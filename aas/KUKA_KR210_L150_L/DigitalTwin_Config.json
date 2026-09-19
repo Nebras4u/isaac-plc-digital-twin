@@ -1,0 +1,167 @@
+{
+  "submodels": [
+    {
+      "modelType": "Submodel",
+      "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/DigitalTwin_Config.json",
+      "idShort": "DigitalTwin_Config",
+      "kind": "Instance",
+      "description": [
+        {
+          "language": "en",
+          "text": "Configuration for the Digital Twin chain: PLC (S7-1500T) <-> OPC UA <-> ROS2 <-> Isaac Sim. Contains mastering offsets and Isaac Sim home offsets used for coordinate frame alignment."
+        }
+      ],
+      "administration": {
+        "version": "1.0",
+        "revision": "1"
+      },
+      "submodelElements": [
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "KUKA_Mastering",
+          "description": [
+            {
+              "language": "en",
+              "text": "$MAMES mastering offsets from $MACHINE.DAT. Conversion: Q_mechanical = Q_mathematical - $MAMES"
+            }
+          ],
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "A1_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A2_deg",
+              "valueType": "xs:double",
+              "value": -90.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A3_deg",
+              "valueType": "xs:double",
+              "value": 90.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A4_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A5_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A6_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            }
+          ],
+          "semanticId": {
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/semantics/KUKA/MAMES"
+              }
+            ]
+          }
+        },
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "IsaacSim_HomeOffset",
+          "description": [
+            {
+              "language": "en",
+              "text": "Offset between Isaac Sim raw joint states and KUKA mechanical zero. Applied as: Q_mech = Q_isaac_raw - offset"
+            }
+          ],
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "A1_deg",
+              "valueType": "xs:double",
+              "value": 0.802
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A2_deg",
+              "valueType": "xs:double",
+              "value": 5.105
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A3_deg",
+              "valueType": "xs:double",
+              "value": -5.094
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A4_deg",
+              "valueType": "xs:double",
+              "value": -1.702
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A5_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            },
+            {
+              "modelType": "Property",
+              "idShort": "A6_deg",
+              "valueType": "xs:double",
+              "value": 0.0
+            }
+          ],
+          "semanticId": {
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/semantics/IsaacSim/HomeOffset"
+              }
+            ]
+          }
+        },
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "Chain",
+          "description": [
+            {
+              "language": "en",
+              "text": "End-to-end digital twin data flow"
+            }
+          ],
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "PLCEndpoint",
+              "valueType": "xs:string",
+              "value": "opc.tcp://111.111.111.10:4840"
+            },
+            {
+              "modelType": "Property",
+              "idShort": "ROS2Topic",
+              "valueType": "xs:string",
+              "value": "/joint_states"
+            },
+            {
+              "modelType": "Property",
+              "idShort": "UpdateRate_Hz",
+              "valueType": "xs:double",
+              "value": 5.0,
+              "description": [
+                { "language": "en", "text": "Bridge loop refresh rate" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

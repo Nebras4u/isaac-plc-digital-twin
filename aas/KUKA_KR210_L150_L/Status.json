@@ -1,0 +1,170 @@
+{
+  "submodels": [
+    {
+      "modelType": "Submodel",
+      "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/Status.json",
+      "idShort": "Status",
+      "kind": "Instance",
+      "description": [
+        {
+          "language": "en",
+          "text": "Read-only runtime status of the KUKA KR210 L150 L. Source: OPC UA bridge reading from DB MAIN_KUKA_KR210_L150_L."
+        }
+      ],
+      "administration": {
+        "version": "1.0",
+        "revision": "1"
+      },
+      "submodelElements": [
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "MainRobotLeft",
+          "semanticId": {
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://opcfoundation.org/UA/Robotics/KR210/RobotInstance/Left"
+              }
+            ]
+          },
+          "value": [
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "ActPos",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Actual Cartesian position [X,Y,Z,A] in mm/deg" },
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_ActPos" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/ActPos"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "ActAng",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Actual joint angles A1..A4 in mathematical frame (deg)" },
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_ActAng" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/ActAng"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Group_Fault",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Group-level fault flag" },
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Group_Fault" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/GroupFault"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis1_Fault",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis1_Fault" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/Axis1Fault"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis2_Fault",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis2_Fault" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/Axis2Fault"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis3_Fault",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis3_Fault" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/Axis3Fault"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis4_Fault",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis4_Fault" }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/Outputs/Axis4Fault"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

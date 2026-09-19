@@ -1,0 +1,71 @@
+{
+  "assetAdministrationShells": [
+    {
+      "modelType": "AssetAdministrationShell",
+      "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/aas/KUKA_KR210_L150_L.json",
+      "idShort": "AAS_KUKA_KR210_L150_L",
+      "description": [
+        {
+          "language": "en",
+          "text": "Asset Administration Shell for KUKA KR210 L150 L industrial robot. Part of the Isaac Digital Twin project (S7-1500T <-> OPC UA <-> ROS2 <-> Isaac Sim)."
+        }
+      ],
+      "assetInformation": {
+        "assetKind": "Instance",
+        "globalAssetId": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/asset/KUKA_KR210_L150_L.json",
+        "specificAssetIds": [
+          {
+            "name": "ManufacturerName",
+            "value": "KUKA"
+          },
+          {
+            "name": "ManufacturerProductDesignation",
+            "value": "KR210 L150 L"
+          },
+          {
+            "name": "SerialNumber",
+            "value": "TBD"
+          }
+        ]
+      },
+      "submodels": [
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/KinematicsControl.json"
+            }
+          ]
+        },
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/OPCUA_Mapping.json"
+            }
+          ]
+        },
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/Status.json"
+            }
+          ]
+        },
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/DigitalTwin_Config.json"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
