@@ -15,8 +15,6 @@ calibration for accurate PLC ↔ simulation joint comparison.
 
 ## 🏗️ Architecture
 
-## 🏗️ Architecture
-
 ```
 [PLC S7-1500T] ← OPC UA → [Python Bridge] ← ROS2 → [Isaac Sim]
                                 ↓
