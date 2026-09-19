@@ -1,0 +1,744 @@
+{
+  "assetAdministrationShells": [
+    {
+      "modelType": "AssetAdministrationShell",
+      "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/aas/KUKA_KR210_L150_L.json",
+      "idShort": "AAS_KUKA_KR210_L150_L",
+      "assetInformation": {
+        "assetKind": "Instance",
+        "globalAssetId": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/asset/KUKA_KR210_L150_L.json"
+      },
+      "submodels": [
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/KinematicsControl.json"
+            }
+          ]
+        },
+        {
+          "type": "ModelReference",
+          "keys": [
+            {
+              "type": "Submodel",
+              "value": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/OPCUA_Mapping.json"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "submodels": [
+    {
+      "modelType": "Submodel",
+      "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/KinematicsControl.json",
+      "idShort": "KinematicsControl",
+      "kind": "Instance",
+      "description": [
+        {
+          "language": "en",
+          "text": "Submodel for kinematics control of KUKA KR210 L150 L robot. TIA Portal v17 project: PLC_IsaacSim_ROS2, Data Block: MAIN_KUKA_KR210_L150_L. Part of the Isaac Digital Twin (S7-1500T ↔ ROS2 ↔ Isaac Sim)."
+        }
+      ],
+      "administration": {
+        "version": "3.0",
+        "revision": "1"
+      },
+      "submodelElements": [
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "Inputs",
+          "description": [
+            {
+              "language": "en",
+              "text": "Inputs: Commands and motion setpoints, written by HMI/SCADA/digital twin, read by the SCL logic"
+            }
+          ],
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "EnableAll",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Power up all axis drives (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_EnableAll" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 2 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/EnableAll"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "EnableKinematics",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Enable kinematics block (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_EnableKinematics" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 2 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/EnableKinematics"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Auto_Mode",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Motion mode: TRUE = Auto routine, FALSE = Manual point-to-point (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Auto_Mode" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/AutoMode"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Vlcty",
+              "valueType": "xs:double",
+              "value": 50.0,
+              "description": [
+                { "language": "en", "text": "Motion velocity used for MC_MoveDirectAbsolute calls (LReal) - mm/s" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Vlcty" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Velocity"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetX",
+              "valueType": "xs:double",
+              "value": 0.0,
+              "description": [
+                { "language": "en", "text": "Target X coordinate for manual move (LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_TargetX" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/TargetX"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetY",
+              "valueType": "xs:double",
+              "value": 0.0,
+              "description": [
+                { "language": "en", "text": "Target Y coordinate for manual move (LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_TargetY" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/TargetY"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetZ",
+              "valueType": "xs:double",
+              "value": 0.0,
+              "description": [
+                { "language": "en", "text": "Target Z coordinate for manual move (LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_TargetZ" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/TargetZ"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "MoveEnable",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Manual mode: enable motion to TargetX/Y/Z (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_MoveEnable" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/MoveEnable"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "HomePos",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 450.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 712.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Manual-mode home position [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_HomePos" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/HomePos"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "UpTheLinePos",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 700.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 434.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Intermediate return/park position used after every stacking cycle [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_UpTheLinePos" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/UpTheLinePos"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "PickUp1",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 703.6 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 294.8 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Approach point 1 of the pickup sequence [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_PickUp1" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/PickUp1"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "PickUp2",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 703.6 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 169.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 294.8 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Approach point 2 of the pickup sequence [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_PickUp2" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/PickUp2"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "PickUp3",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": 703.6 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 169.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 434.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Approach point 3 of the pickup sequence [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_PickUp3" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/PickUp3"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementList",
+              "idShort": "Pos4Maint",
+              "typeValueListElement": "Property",
+              "valueTypeListElement": "xs:double",
+              "value": [
+                { "modelType": "Property", "valueType": "xs:double", "value": -486.8 },
+                { "modelType": "Property", "valueType": "xs:double", "value": -418.6 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 205.0 },
+                { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+              ],
+              "description": [
+                { "language": "en", "text": "Manual-mode maintenance position [X,Y,Z,A] (Array[1..4] of LReal)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Pos4Maint" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Pos4Maint"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Go2Pos4Maint",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Manual-mode trigger: move to maintenance position (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Go2Pos4Maint" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Go2Pos4Maint"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Go2HomePos",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Manual-mode trigger: move to home position (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Go2HomePos" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Go2HomePos"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Stacking2Left",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Auto-mode trigger: run the left stacking routine (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Stacking2Left" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Stacking2Left"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Stacking2Right",
+              "valueType": "xs:boolean",
+              "value": false,
+              "description": [
+                { "language": "en", "text": "Auto-mode trigger: run the right stacking routine (BOOL)" },
+                { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_Stacking2Right" }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/Stacking2Right"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementCollection",
+              "idShort": "StackingLeft_Points",
+              "description": [
+                {
+                  "language": "en",
+                  "text": "Sequence of 6 points for the left stacking station (each Array[1..4] of LReal, stored as 6 separate DB tags StackingLeft_Points1..StackingLeft_Points6)"
+                }
+              ],
+              "value": [
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_1",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 400.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 475.6 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 707.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points1" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_2",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -157.5 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 601.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 707.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points2" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_3",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -339.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 472.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 469.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points3" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point3"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_4",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -339.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 472.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 231.6 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points4" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point4"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_5",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -338.9 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 639.7 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 231.6 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points5" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point5"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_6",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -339.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 472.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 250.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingLeft_Points6" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeft/Point6"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "qualifiers": [
+                { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 2 }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingLeftPoints"
+                  }
+                ]
+              }
+            },
+            {
+              "modelType": "SubmodelElementCollection",
+              "idShort": "StackingRight_Points",
+              "description": [
+                {
+                  "language": "en",
+                  "text": "Sequence of 6 points for the right stacking station (each Array[1..4] of LReal, stored as 6 separate DB tags StackingRight_Points1..StackingRight_Points6)"
+                }
+              ],
+              "value": [
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_1",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 1336.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -1089.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 1208.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingRight_Points1" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingRight/Point1"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_2",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 615.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -1521.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 1381.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingRight_Points2" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingRight/Point2"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_3",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -874.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -1389.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 1381.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingRight_Points3" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingRight/Point3"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_4",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -874.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -1389.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 355.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "SCL: \"MAIN_KUKA_KR210_L150_L\".MainRobotLeft_StackingRight_Points4" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      {
+                        "type": "GlobalReference",
+                        "value": "https://opcfoundation.org/UA/Robotics/KR210/Inputs/StackingRight/Point4"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Point_5",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -874.0 },
+                    { "modelType": "Property", "valueType": "xs:
