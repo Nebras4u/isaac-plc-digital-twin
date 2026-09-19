@@ -1,0 +1,427 @@
+#Temp_Transition_Blend[1] := 50.0;
+#Temp_Transition_Stop[1] := 0.0;
+#Robot_Step := 10;
+
+// ==========================================================================
+// SECTION 1: SYSTEM VISIBILITY & FAULT MONITORING
+// ==========================================================================
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Group_Fault := "MainRobotLeft_Kinematics_1".StatusWord.%X1;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis1_Fault := "MainRobotLeft_PositioningAxis_1".StatusWord.%X1;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis2_Fault := "MainRobotLeft_PositioningAxis_2".StatusWord.%X1;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis3_Fault := "MainRobotLeft_PositioningAxis_3".StatusWord.%X1;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis4_Fault := "MainRobotLeft_PositioningAxis_4".StatusWord.%X1;
+
+// ==========================================================================
+// SECTION 2: POWER MANAGEMENT & DRIVE INTERLOCKS
+// ==========================================================================
+
+"MC_PWR_Ax1_DB"(Axis := "MainRobotLeft_PositioningAxis_1",
+                Enable := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableAll,
+                StartMode := 1,
+                StopMode := 0);
+
+"MC_PWR_Ax2_DB"(Axis := "MainRobotLeft_PositioningAxis_2",
+                Enable := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableAll,
+                StartMode := 1,
+                StopMode := 0);
+
+"MC_PWR_Ax3_DB"(Axis := "MainRobotLeft_PositioningAxis_3",
+                Enable := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableAll,
+                StartMode := 1,
+                StopMode := 0);
+
+"MC_PWR_Ax4_DB"(Axis := "MainRobotLeft_PositioningAxis_4",
+                Enable := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableAll,
+                StartMode := 1,
+                StopMode := 0);
+
+#System_Hardware_Ready := "MC_PWR_Ax1_DB".Status
+AND "MC_PWR_Ax2_DB".Status
+AND "MC_PWR_Ax3_DB".Status
+AND "MC_PWR_Ax4_DB".Status;
+
+// ==========================================================================
+// SECTION 3: SEQUENTIAL TRAFFIC CONTROL
+// ==========================================================================
+
+IF NOT #System_Hardware_Ready THEN
+    "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableKinematics := FALSE;
+    "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Go2Pos4Maint := FALSE;
+    #Trigger_Motion := FALSE;
+ELSE
+    IF "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableKinematics AND NOT #Old_Kinematics_State THEN
+        #Trigger_Motion := TRUE;
+    ELSE
+        #Trigger_Motion := FALSE;
+    END_IF;
+END_IF;
+
+#Old_Kinematics_State := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_EnableKinematics;
+
+// ==========================================================================
+// SECTION 4: MOTION COMMANDS EXECUTION
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// 4.1 AUTOMATIC ROUTINE - LEFT STACKING
+// --------------------------------------------------------------------------
+
+IF "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Auto_Mode AND "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Stacking2Left THEN
+    // 4.1.1 Approach & Pickup Sequence
+    "MC_PickUp1"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := #Trigger_Motion,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp1,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    "MC_PickUp2"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := "MC_PickUp1".Active,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp2,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    "MC_PickUp3"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := "MC_PickUp2".Active,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp3,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    // 4.1.2 Left Stacking Sequence
+    "MC_Stkng_L1"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_PickUp3".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points1,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_L2"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_L1".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points2,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_L3"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_L2".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points3,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_L4"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_L3".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points4,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_L5"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_L4".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points5,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_L6"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_L5".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingLeft_Points6,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    // 4.1.3 Return to Home Position
+    "MC_UpTheLinePos_Return"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                             Execute := "MC_Stkng_L6".Active,
+                             Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_UpTheLinePos,
+                             Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                             Acceleration := -1,
+                             Deceleration := -1,
+                             Jerk := -1,
+                             DirectionA := 3,
+                             CoordSystem := 0,
+                             BufferMode := 1,
+                             TransitionParameter := #Temp_Transition_Stop,
+                             DynamicAdaption := -1);
+    
+    // --------------------------------------------------------------------------
+    // 4.2 AUTOMATIC ROUTINE - RIGHT STACKING
+    // --------------------------------------------------------------------------
+    
+ELSIF "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Auto_Mode AND "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Stacking2Right THEN
+    
+    // 4.2.1 Approach & Pickup Sequence
+    "MC_PickUp1"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := #Trigger_Motion,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp1,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    "MC_PickUp2"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := "MC_PickUp1".Active,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp2,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    "MC_PickUp3"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                 Execute := "MC_PickUp2".Active,
+                 Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_PickUp3,
+                 Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                 Acceleration := -1,
+                 Deceleration := -1,
+                 Jerk := -1,
+                 DirectionA := 3,
+                 CoordSystem := 0,
+                 BufferMode := 2,
+                 TransitionParameter := #Temp_Transition_Blend,
+                 DynamicAdaption := -1);
+    
+    // 4.2.2 Right Stacking Sequence
+    "MC_Stkng_R1"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_PickUp3".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points1,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_R2"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_R1".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points2,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_R3"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_R2".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points3,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_R4"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_R3".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points4,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_R5"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_R4".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points5,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    "MC_Stkng_R6"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                  Execute := "MC_Stkng_R5".Active,
+                  Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_StackingRight_Points6,
+                  Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                  Acceleration := -1,
+                  Deceleration := -1,
+                  Jerk := -1,
+                  DirectionA := 3,
+                  CoordSystem := 0,
+                  BufferMode := 2,
+                  TransitionParameter := #Temp_Transition_Blend,
+                  DynamicAdaption := -1);
+    
+    // 4.2.3 Return to Home Position
+    "MC_UpTheLinePos_Return"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                             Execute := "MC_Stkng_R6".Active,
+                             Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_UpTheLinePos,
+                             Velocity := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Vlcty,
+                             Acceleration := -1,
+                             Deceleration := -1,
+                             Jerk := -1,
+                             DirectionA := 3,
+                             CoordSystem := 0,
+                             BufferMode := 1,
+                             TransitionParameter := #Temp_Transition_Stop,
+                             DynamicAdaption := -1);
+    
+END_IF;
+
+// --------------------------------------------------------------------------
+// 4.3 MANUAL POINT-TO-POINT ROUTINE
+// --------------------------------------------------------------------------
+
+"MC_Go2HomePos"(AxesGroup := "MainRobotLeft_Kinematics_1",
+                Execute := (#Trigger_Motion AND NOT "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Auto_Mode AND "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Go2HomePos),
+                Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_HomePos,
+                Velocity := 50.0,
+                Acceleration := -1,
+                Deceleration := -1,
+                Jerk := -1,
+                DirectionA := 3,
+                CoordSystem := 0,
+                BufferMode := 1,
+                TransitionParameter := #Temp_Transition_Stop,
+                DynamicAdaption := -1);
+
+"MC_Pos4Maint"(AxesGroup := "MainRobotLeft_Kinematics_1",
+               Execute := (#Trigger_Motion AND NOT "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Auto_Mode AND "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Go2Pos4Maint),
+               Position := "MAIN_KUKA_KR210_L150_L".MainRobotLeft_Pos4Maint,
+               Velocity := 50.0,
+               Acceleration := -1,
+               Deceleration := -1,
+               Jerk := -1,
+               DirectionA := 3,
+               CoordSystem := 0,
+               BufferMode := 1,
+               TransitionParameter := #Temp_Transition_Stop,
+               DynamicAdaption := -1);
+
+// ==========================================================================
+// SECTION 5: TELEMETRY & DATA FEEDBACK
+// ==========================================================================
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActPos[1] := "MainRobotLeft_Kinematics_1".Tcp.x;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActPos[2] := "MainRobotLeft_Kinematics_1".Tcp.y;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActPos[3] := "MainRobotLeft_Kinematics_1".Tcp.z;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActPos[4] := "MainRobotLeft_Kinematics_1".Tcp.a;
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActAng[1] := "MainRobotLeft_PositioningAxis_1".ActualPosition;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActAng[2] := "MainRobotLeft_PositioningAxis_2".ActualPosition;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActAng[3] := "MainRobotLeft_PositioningAxis_3".ActualPosition;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_ActAng[4] := "MainRobotLeft_PositioningAxis_4".ActualPosition;
+// --------------------------------------------------------------------------
+// 5.1 Hardware Limit Status Monitoring
+// --------------------------------------------------------------------------
+
+IF "MainRobotLeft_PositioningAxis_1".StatusWord.%X17 THEN
+    // Negative hardware limit (Minimum) is reached
+    #non := #non;
+END_IF;
+
+IF "MainRobotLeft_PositioningAxis_1".StatusWord.%X18 THEN
+    // Positive hardware limit (Maximum) is reached
+    #non := #non;
+END_IF;
+
+IF "MainRobotLeft_PositioningAxis_1".StatusWord.%X15 THEN
+    // Software limit minimum exceeded
+    #non := #non;
+END_IF;
+
+IF "MainRobotLeft_PositioningAxis_1".StatusWord.%X16 THEN
+    // Software limit maximum reached
+    #non := #non;
+END_IF;
+
+// Simulated without SINA_PARA ...
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Speed[1] := "MainRobotLeft_PositioningAxis_1".ActualVelocity;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Torque[1] := "MainRobotLeft_PositioningAxis_1".ActualVelocity * 0.15;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis_Power[1] := "MainRobotLeft_PositioningAxis_1".ActualVelocity * 2.3;
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Speed[2] := "MainRobotLeft_PositioningAxis_2".ActualVelocity;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Torque[2] := "MainRobotLeft_PositioningAxis_2".ActualVelocity * 0.15;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis_Power[2] := "MainRobotLeft_PositioningAxis_2".ActualVelocity * 2.3;
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Speed[3] := "MainRobotLeft_PositioningAxis_3".ActualVelocity;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Torque[3] := "MainRobotLeft_PositioningAxis_3".ActualVelocity * 0.15;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis_Power[3] := "MainRobotLeft_PositioningAxis_3".ActualVelocity * 2.3;
+
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Speed[4] := "MainRobotLeft_PositioningAxis_4".ActualVelocity;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Dynamic_Torque[4] := "MainRobotLeft_PositioningAxis_4".ActualVelocity * 0.15;
+"MAIN_KUKA_KR210_L150_L".MainRobotLeft_Axis_Power[4] := "MainRobotLeft_PositioningAxis_4".ActualVelocity * 2.3;
