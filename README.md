@@ -57,7 +57,7 @@ calibration for accurate PLC ↔ simulation joint comparison.
 
 ## 📖 References
 Inspired by: *Isaac Sim Integrated Digital Twin For Feasibility Checks 
-In Skill-based Engineering* (RAAD 2025) — [DOI link]
+Inspired by: Isaac Sim Integrated Digital Twin For Feasibility Checks In Skill-based Engineering (RAAD 2025) — [DOI: 10.1007/978-3-032-02106-9_46](https://doi.org/10.1007/978-3-032-02106-9_46)
 
 ## 📜 License
 MIT
