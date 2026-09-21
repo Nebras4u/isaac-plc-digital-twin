@@ -1,0 +1,342 @@
+{
+  "modelType": "Submodel",
+  "id": "https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/sm/KUKA_KR210_L150_L/OPCUA_Mapping.json",
+  "idShort": "OPCUA_Mapping",
+  "kind": "Instance",
+  "description": [
+    {
+      "language": "en",
+      "text": "OPC UA mapping for KUKA KR210 L150 L. PLC endpoint: opc.tcp://111.111.111.10:4840 (S7-1500T), Namespace: 3, Data Block: MAIN_KUKA_KR210_L150_L. Auto-derived from the ROS2<->PLC bridge node."
+    }
+  ],
+  "administration": {
+    "version": "3.1",
+    "revision": "1"
+  },
+  "submodelElements": [
+    {
+      "modelType": "SubmodelElementCollection",
+      "idShort": "ConnectionInfo",
+      "value": [
+        {
+          "modelType": "Property",
+          "idShort": "EndpointUrl",
+          "valueType": "xs:string",
+          "value": "opc.tcp://111.111.111.10:4840",
+          "semanticId": {
+            "keys": [{
+              "type": "GlobalReference",
+              "value": "https://opcfoundation.org/UA/DI/EndpointUrl"
+            }]
+          }
+        },
+        {
+          "modelType": "Property",
+          "idShort": "NamespaceIndex",
+          "valueType": "xs:int",
+          "value": 3,
+          "semanticId": {
+            "keys": [{
+              "type": "GlobalReference",
+              "value": "https://opcfoundation.org/UA/DI/NamespaceIndex"
+            }]
+          }
+        },
+        {
+          "modelType": "Property",
+          "idShort": "DataBlockName",
+          "valueType": "xs:string",
+          "value": "MAIN_KUKA_KR210_L150_L",
+          "semanticId": {
+            "keys": [{
+              "type": "GlobalReference",
+              "value": "https://opcfoundation.org/UA/DI/DataBlockName"
+            }]
+          }
+        }
+      ]
+    },
+    {
+      "modelType": "SubmodelElementCollection",
+      "idShort": "MainRobotLeft",
+      "description": [
+        {
+          "language": "en",
+          "text": "OPC UA NodeIds for the left robot instance. Paths match Inputs/MainRobotLeft/* in KinematicsControl submodel."
+        }
+      ],
+      "semanticId": {
+        "keys": [{
+          "type": "GlobalReference",
+          "value": "https://opcfoundation.org/UA/Robotics/KR210/RobotInstance/Left"
+        }]
+      },
+      "value": [
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "Inputs",
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "EnableAll",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_EnableAll\"",
+              "description": [
+                { "language": "en", "text": "Maps to KinematicsControl/Inputs/MainRobotLeft/EnableAll" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "EnableKinematics",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_EnableKinematics\"",
+              "description": [
+                { "language": "en", "text": "Maps to KinematicsControl/Inputs/MainRobotLeft/EnableKinematics" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Auto_Mode",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Auto_Mode\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Vlcty",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Vlcty\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetX",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_TargetX\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetY",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_TargetY\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "TargetZ",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_TargetZ\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "MoveEnable",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_MoveEnable\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "HomePos",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_HomePos\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "UpTheLinePos",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_UpTheLinePos\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "PickUp1",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_PickUp1\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "PickUp2",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_PickUp2\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "PickUp3",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_PickUp3\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Pos4Maint",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Pos4Maint\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Go2Pos4Maint",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Go2Pos4Maint\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Go2HomePos",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Go2HomePos\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Stacking2Left",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Stacking2Left\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Stacking2Right",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Stacking2Right\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points1",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points1\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points2",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points2\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points3",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points3\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points4",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points4\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points5",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points5\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingLeft_Points6",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingLeft_Points6\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points1",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points1\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points2",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points2\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points3",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points3\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points4",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points4\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points5",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points5\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "StackingRight_Points6",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_StackingRight_Points6\""
+            }
+          ]
+        },
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "Outputs",
+          "description": [
+            {
+              "language": "en",
+              "text": "Read-only status fields for the left robot. Auto-derived from the ROS2<->PLC bridge node."
+            }
+          ],
+          "value": [
+            {
+              "modelType": "Property",
+              "idShort": "ActPos",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_ActPos\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: current Cartesian position [X,Y,Z,A] in mm/deg" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "ActAng",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_ActAng\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: current joint angles A1..A4 in mathematical frame (deg)" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Pos4Maint",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Pos4Maint\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: maintenance pose target [X,Y,Z,A]" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Group_Fault",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Group_Fault\"",
+              "description": [
+                { "language": "en", "text": "BOOL: group-level fault flag" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis1_Fault",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis1_Fault\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis2_Fault",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis2_Fault\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis3_Fault",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis3_Fault\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis4_Fault",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis4_Fault\""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

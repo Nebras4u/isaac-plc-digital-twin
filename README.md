@@ -13,7 +13,30 @@ Real-time bidirectional synchronization between:
 Includes KUKA $MAMES frame conversion and Isaac Home offset 
 calibration for accurate PLC ↔ simulation joint comparison.
 
-## 🏗️ Architecture
+```mermaid
+flowchart TB
+    subgraph Control["🎛️ CONTROL — Virtual PLC"]
+        A[S7-1500T<br/>PLCSIM Advanced<br/>SCL + PLCopen Motion]
+    end
+    
+    subgraph Bridge["🔗 BRIDGE — Python"]
+        B[bridge.py<br/>asyncua + rclpy<br/>Frame Conversion]
+    end
+    
+    subgraph Sim["🎬 SIMULATION"]
+        C[Isaac Sim<br/>PhysX 5<br/>KUKA KR210 URDF]
+    end
+    
+    A -->|OPC UA :4840<br/>ns=3<br/>Read Arrays/Flags| B
+    C -->|ROS2 / DDS<br/>/joint_states| B
+    B -->|Compare<br/>Δ ≈ 0°| Result((✅ Validated))
+    
+    style Control fill:#1e3a8a,color:#fff
+    style Bridge fill:#065f46,color:#fff
+    style Sim fill:#7c2d12,color:#fff
+    style Result fill:#15803d,color:#fff
+```
+
 
 ## 🏗️ Architecture
 
@@ -59,7 +82,7 @@ calibration for accurate PLC ↔ simulation joint comparison.
 
 ## 📖 References
 Inspired by: *Isaac Sim Integrated Digital Twin For Feasibility Checks 
-In Skill-based Engineering* (RAAD 2025) — [DOI link]
+Inspired by: Isaac Sim Integrated Digital Twin For Feasibility Checks In Skill-based Engineering (RAAD 2025) — [DOI: 10.1007/978-3-032-02106-9_46](https://doi.org/10.1007/978-3-032-02106-9_46)
 
 ## 📜 License
 MIT
