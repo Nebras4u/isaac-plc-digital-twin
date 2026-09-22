@@ -8,11 +8,11 @@
       "description": [
         {
           "language": "en",
-          "text": "Submodel for kinematics control of KUKA KR210 L150 L. TIA Portal v17 project: PLC_IsaacSim_ROS2, DB: MAIN_KUKA_KR210_L150_L. Part of the Isaac Digital Twin (S7-1500T <-> ROS2 <-> Isaac Sim)."
+          "text": "Kinematics control submodel for KUKA KR210 L150 L. Provides motion commands and setpoints to the S7-1500T PLC. Part of the Isaac Digital Twin: S7-1500T <-> OPC UA <-> ROS2 <-> Isaac Sim (Yaskawa GP110 URDF). TIA Portal v17 project: PLC_IsaacSim_ROS2. Data block: MAIN_KUKA_KR210_L150_L. OPC UA endpoint: opc.tcp://111.111.111.10:4840 (namespace index 3)."
         }
       ],
       "administration": {
-        "version": "3.2",
+        "version": "3.3",
         "revision": "1"
       },
       "submodelElements": [
@@ -218,14 +218,15 @@
                   "typeValueListElement": "Property",
                   "valueTypeListElement": "xs:double",
                   "value": [
-                    { "modelType": "Property", "valueType": "xs:double", "value": 450.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 2210.0 },
                     { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
-                    { "modelType": "Property", "valueType": "xs:double", "value": 712.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 540.0 },
                     { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
                   ],
                   "description": [
                     { "language": "en", "text": "Manual-mode home position [X,Y,Z,A] (Array[1..4] of LReal)" },
-                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_HomePos" }
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_HomePos" },
+                    { "language": "en", "text": "Verified from live PLC: (2210.0, 0.0, 540.0, 0.0)" }
                   ],
                   "qualifiers": [
                     { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
@@ -360,7 +361,8 @@
                   ],
                   "description": [
                     { "language": "en", "text": "Manual-mode maintenance position [X,Y,Z,A]" },
-                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Pos4Maint" }
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Pos4Maint" },
+                    { "language": "en", "text": "Verified from live PLC: (-486.8, -418.6, 205.0, 0.0)" }
                   ],
                   "qualifiers": [
                     { "type": "AllowedWriteRole", "valueType": "xs:int", "value": 1 }
@@ -778,6 +780,309 @@
                         ]
                       }
                     }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "modelType": "SubmodelElementCollection",
+          "idShort": "Outputs",
+          "description": [
+            {
+              "language": "en",
+              "text": "Actual robot state read back from the S7-1500T PLC via OPC UA. Updated every PLC cycle. These values are consumed by the ROS2 bridge (plc_reader.py) and compared against Isaac Sim TF data."
+            }
+          ],
+          "value": [
+            {
+              "modelType": "SubmodelElementCollection",
+              "idShort": "MainRobotLeft",
+              "description": [
+                {
+                  "language": "en",
+                  "text": "Left robot instance. Maps to SCL prefix: MAIN_KUKA_KR210_L150_L.MainRobotLeft_*"
+                }
+              ],
+              "semanticId": {
+                "keys": [
+                  {
+                    "type": "GlobalReference",
+                    "value": "https://opcfoundation.org/UA/Robotics/KR210/RobotInstance/Left"
+                  }
+                ]
+              },
+              "value": [
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "ActPos",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 2210.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 540.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Actual Cartesian TCP position [X,Y,Z,A] in mm/deg (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_ActPos" },
+                    { "language": "en", "text": "At Home position: (2210.0, 0.0, 540.0, 0.0)" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/ActPos" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "ActAng",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 90.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -90.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Actual joint angles [A1,A2,A3,A4] in degrees (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_ActAng" },
+                    { "language": "en", "text": "Includes $MAMES mastering offsets: A2=+90 deg, A3=-90 deg" },
+                    { "language": "en", "text": "At Home position: (0.0, 90.0, -90.0, 0.0)" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/ActAng" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Pos4Maint",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": -486.8 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": -418.6 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 205.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Maintenance position setpoint read back [X,Y,Z,A] (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Pos4Maint" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/Pos4Maint" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "Property",
+                  "idShort": "Motion_Active",
+                  "valueType": "xs:boolean",
+                  "value": false,
+                  "description": [
+                    { "language": "en", "text": "TRUE when the robot is currently executing a motion (BOOL)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Motion_Active" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/MotionActive" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "Property",
+                  "idShort": "Emergency_Stop_Active",
+                  "valueType": "xs:boolean",
+                  "value": false,
+                  "description": [
+                    { "language": "en", "text": "TRUE when the E-Stop chain is active (BOOL)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Emergency_Stop_Active" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/EmergencyStopActive" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "Property",
+                  "idShort": "Error_Code",
+                  "valueType": "xs:int",
+                  "value": 0,
+                  "description": [
+                    { "language": "en", "text": "Current PLC/robot error code (INT, 0 = no error)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Error_Code" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/ErrorCode" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "Property",
+                  "idShort": "Group_Fault",
+                  "valueType": "xs:boolean",
+                  "value": false,
+                  "description": [
+                    { "language": "en", "text": "Group fault flag (BOOL)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Group_Fault" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/GroupFault" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementCollection",
+                  "idShort": "Axis_Faults",
+                  "description": [
+                    { "language": "en", "text": "Per-axis fault flags (BOOL each)" }
+                  ],
+                  "value": [
+                    {
+                      "modelType": "Property",
+                      "idShort": "Axis1_Fault",
+                      "valueType": "xs:boolean",
+                      "value": false,
+                      "description": [
+                        { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis1_Fault" }
+                      ]
+                    },
+                    {
+                      "modelType": "Property",
+                      "idShort": "Axis2_Fault",
+                      "valueType": "xs:boolean",
+                      "value": false,
+                      "description": [
+                        { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis2_Fault" }
+                      ]
+                    },
+                    {
+                      "modelType": "Property",
+                      "idShort": "Axis3_Fault",
+                      "valueType": "xs:boolean",
+                      "value": false,
+                      "description": [
+                        { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis3_Fault" }
+                      ]
+                    },
+                    {
+                      "modelType": "Property",
+                      "idShort": "Axis4_Fault",
+                      "valueType": "xs:boolean",
+                      "value": false,
+                      "description": [
+                        { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis4_Fault" }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Axis_Limits",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Axis limit proximity flags [A1,A2,A3,A4] (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis_Limits" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/AxisLimits" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Axis_Power",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Per-axis power/current feedback [A1,A2,A3,A4] (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Axis_Power" }
+                  ],
+                  "semanticId": {
+                    "keys": [
+                      { "type": "GlobalReference", "value": "https://opcfoundation.org/UA/Robotics/Outputs/AxisPower" }
+                    ]
+                  }
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "DB_Axis",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Dead-band / tolerance per axis [A1,A2,A3,A4] (Array[1..4] of LReal)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_DB_A1..A4" }
+                  ]
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Dynamic_Speed",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Dynamic speed feedback per axis [A1,A2,A3,A4]" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Dynamic_Speed" }
+                  ]
+                },
+                {
+                  "modelType": "SubmodelElementList",
+                  "idShort": "Dynamic_Torque",
+                  "typeValueListElement": "Property",
+                  "valueTypeListElement": "xs:double",
+                  "value": [
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 },
+                    { "modelType": "Property", "valueType": "xs:double", "value": 0.0 }
+                  ],
+                  "description": [
+                    { "language": "en", "text": "Dynamic torque feedback per axis [A1,A2,A3,A4]" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_Dynamic_Torque" }
+                  ]
+                },
+                {
+                  "modelType": "Property",
+                  "idShort": "AccessControl",
+                  "valueType": "xs:int",
+                  "value": 0,
+                  "description": [
+                    { "language": "en", "text": "Access control level (INT)" },
+                    { "language": "en", "text": "SCL: MAIN_KUKA_KR210_L150_L.MainRobotLeft_AccessControl" }
                   ]
                 }
               ]
