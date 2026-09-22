@@ -1,5 +1,4 @@
-# KUKA KR210 L150 L
-
+# Main Robot_L Yaskawa GP110
 ## Architecture
 - AAS: Full documentation (5 files)
 - HMI: Manual binding (small project decision)
