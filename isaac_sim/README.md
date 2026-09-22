@@ -35,7 +35,7 @@ This document describes the complete setup of the **Yaskawa GP110** robot inside
 
 The original robot model in the project was a **KUKA KR210 L150**. During calibration, a fundamental mismatch was discovered:
 
-- In the KR210 URDF, the axis **A2 is not horizontal** — it carries a vertical offset (**Z ≈ 419 mm**) between A2 and A3.
+- In the KR210 URDF, the axis **A2 is not horizontal** — it carries (Y and Z) offset between A2 and A3.
 - **TIA Portal's `Articulated arm 3D with orientation` kinematics block only accepts a horizontal offset (`L2`) for axis A2.** There is no field to describe a vertical offset between A2 and A3.
 - As a result, the KR210 could not be represented faithfully in TIA Portal without introducing kinematic errors.
 
@@ -252,9 +252,9 @@ Main_Robot_L_Yaskawa_GP110   (root, fixed to world)
 - link_1  (A1)
   - link_2  (A2)
     - link_3  (A3)
-      - link_4  (A4, formerly joint_6)
+      - link_4  (FixedJoint)
         - link_5  (A5, hidden, Python-driven)
-          - link_6  (tool flange)
+          - link_6  (A4, formerly joint_6)
             - tool0  (TCP)
 
 ## Appendix B — ROS 2 Topics
