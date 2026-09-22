@@ -9,6 +9,9 @@ The root cause was traced to the **geometric representation of Link 1** (the rob
 
 **Consequence:** Because TIA Portal was calculating forward and inverse kinematics based on a simplified 2D schematic, the joint angles and end-effector positions diverged significantly from Isaac Sim’s physics-based calculations. This resulted in **motion desynchronization**, making it impossible to validate the control logic.
 
+### Isaac Sim vs. TIA Portal
+![Kinematic Mismatch](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/isaac_sim/Kinematic_Mismatch.jpg)
+
 ---
 
 #### The Solution: Switching to a Custom Minimal URDF [arm4_kr210_like.urdf]
@@ -22,3 +25,6 @@ To resolve this mismatch and ensure 1:1 kinematic synchronization, the decision 
 4.  **Direct Mapping to TIA Portal Parameters:** The custom URDF was designed specifically to mirror the "Transformation parameters" (Length L1, L2, L3, etc.) seen in the TIA Portal Geometry editor. This creates a direct, transparent mapping where a change in the URDF directly corresponds to a parameter in the PLC configuration, ensuring that the digital twin and the simulation remain perfectly aligned.
 
 **Result:** By using a lightweight, mathematically precise URDF that explicitly models the offsets between Joint 1 and Joint 2, the kinematic mismatch was eliminated. The joint angles received from TIA Portal now produce identical end-effector poses in Isaac Sim, enabling reliable software-in-the-loop (SIL) testing.
+
+### Custom URDF vs. TIA Portal
+![Kinematic Mismatch](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/isaac_sim/urdf.jpg.jpg)
