@@ -6,17 +6,23 @@
   "description": [
     {
       "language": "en",
-      "text": "OPC UA mapping for KUKA KR210 L150 L. PLC endpoint: opc.tcp://111.111.111.10:4840 (S7-1500T), Namespace: 3, Data Block: MAIN_KUKA_KR210_L150_L. Auto-derived from the ROS2<->PLC bridge node."
+      "text": "OPC UA mapping for KUKA KR210 L150 L. PLC endpoint: opc.tcp://111.111.111.10:4840 (S7-1500T), Namespace index: 3 (http://www.siemens.com/simatic-s7-opcua), Data Block: MAIN_KUKA_KR210_L150_L. TIA Portal v17 project: PLC_IsaacSim_ROS2. Auto-derived from the ROS2<->PLC bridge node (plc_reader.py)."
     }
   ],
   "administration": {
-    "version": "3.1",
+    "version": "3.2",
     "revision": "1"
   },
   "submodelElements": [
     {
       "modelType": "SubmodelElementCollection",
       "idShort": "ConnectionInfo",
+      "description": [
+        {
+          "language": "en",
+          "text": "OPC UA connection details for the S7-1500T PLC hosting the digital twin. Verified live from the ROS2<->PLC bridge node (plc_reader.py)."
+        }
+      ],
       "value": [
         {
           "modelType": "Property",
@@ -24,10 +30,12 @@
           "valueType": "xs:string",
           "value": "opc.tcp://111.111.111.10:4840",
           "semanticId": {
-            "keys": [{
-              "type": "GlobalReference",
-              "value": "https://opcfoundation.org/UA/DI/EndpointUrl"
-            }]
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://opcfoundation.org/UA/DI/EndpointUrl"
+              }
+            ]
           }
         },
         {
@@ -35,24 +43,100 @@
           "idShort": "NamespaceIndex",
           "valueType": "xs:int",
           "value": 3,
+          "description": [
+            {
+              "language": "en",
+              "text": "Index 3 = http://www.siemens.com/simatic-s7-opcua"
+            }
+          ],
           "semanticId": {
-            "keys": [{
-              "type": "GlobalReference",
-              "value": "https://opcfoundation.org/UA/DI/NamespaceIndex"
-            }]
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://opcfoundation.org/UA/DI/NamespaceIndex"
+              }
+            ]
           }
+        },
+        {
+          "modelType": "Property",
+          "idShort": "NamespaceUri",
+          "valueType": "xs:string",
+          "value": "http://www.siemens.com/simatic-s7-opcua",
+          "description": [
+            {
+              "language": "en",
+              "text": "Siemens S7-1500 OPC UA namespace for PLC symbol access"
+            }
+          ]
         },
         {
           "modelType": "Property",
           "idShort": "DataBlockName",
           "valueType": "xs:string",
           "value": "MAIN_KUKA_KR210_L150_L",
+          "description": [
+            {
+              "language": "en",
+              "text": "TIA Portal DB holding all robot variables (Inputs + Outputs)"
+            }
+          ],
           "semanticId": {
-            "keys": [{
-              "type": "GlobalReference",
-              "value": "https://opcfoundation.org/UA/DI/DataBlockName"
-            }]
+            "keys": [
+              {
+                "type": "GlobalReference",
+                "value": "https://opcfoundation.org/UA/DI/DataBlockName"
+              }
+            ]
           }
+        },
+        {
+          "modelType": "Property",
+          "idShort": "TIAProjectName",
+          "valueType": "xs:string",
+          "value": "PLC_IsaacSim_ROS2"
+        },
+        {
+          "modelType": "Property",
+          "idShort": "TIAPortalVersion",
+          "valueType": "xs:string",
+          "value": "v17"
+        },
+        {
+          "modelType": "Property",
+          "idShort": "S7OptimizedAccess",
+          "valueType": "xs:boolean",
+          "value": false,
+          "description": [
+            {
+              "language": "en",
+              "text": "Must be FALSE for OPC UA symbol access"
+            }
+          ]
+        },
+        {
+          "modelType": "Property",
+          "idShort": "S7VisibleInOPCUA",
+          "valueType": "xs:boolean",
+          "value": true,
+          "description": [
+            {
+              "language": "en",
+              "text": "Must be TRUE for variables to appear in OPC UA address space"
+            }
+          ]
+        },
+        {
+          "modelType": "Property",
+          "idShort": "SessionTimeoutMs",
+          "valueType": "xs:int",
+          "value": 30000,
+          "description": [
+            {
+              "language": "en",
+              "text": "Requested 3600000ms, server enforces 30000ms (S7-1500 default)"
+            }
+          ]
         }
       ]
     },
@@ -62,19 +146,27 @@
       "description": [
         {
           "language": "en",
-          "text": "OPC UA NodeIds for the left robot instance. Paths match Inputs/MainRobotLeft/* in KinematicsControl submodel."
+          "text": "OPC UA NodeIds for the left robot instance. Paths match Inputs/MainRobotLeft/* and Outputs/MainRobotLeft/* in the KinematicsControl submodel."
         }
       ],
       "semanticId": {
-        "keys": [{
-          "type": "GlobalReference",
-          "value": "https://opcfoundation.org/UA/Robotics/KR210/RobotInstance/Left"
-        }]
+        "keys": [
+          {
+            "type": "GlobalReference",
+            "value": "https://opcfoundation.org/UA/Robotics/KR210/RobotInstance/Left"
+          }
+        ]
       },
       "value": [
         {
           "modelType": "SubmodelElementCollection",
           "idShort": "Inputs",
+          "description": [
+            {
+              "language": "en",
+              "text": "Write-accessible OPC UA NodeIds. Mapped 1:1 to KinematicsControl/Inputs/MainRobotLeft/*"
+            }
+          ],
           "value": [
             {
               "modelType": "Property",
@@ -270,7 +362,7 @@
           "description": [
             {
               "language": "en",
-              "text": "Read-only status fields for the left robot. Auto-derived from the ROS2<->PLC bridge node."
+              "text": "Read-only status fields for the left robot. Auto-derived from the ROS2<->PLC bridge node (plc_reader.py). Updated every PLC cycle."
             }
           ],
           "value": [
@@ -280,7 +372,8 @@
               "valueType": "xs:string",
               "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_ActPos\"",
               "description": [
-                { "language": "en", "text": "Array[1..4] of LReal: current Cartesian position [X,Y,Z,A] in mm/deg" }
+                { "language": "en", "text": "Array[1..4] of LReal: current Cartesian position [X,Y,Z,A] in mm/deg" },
+                { "language": "en", "text": "At Home: (2210.0, 0.0, 540.0, 0.0)" }
               ]
             },
             {
@@ -289,7 +382,8 @@
               "valueType": "xs:string",
               "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_ActAng\"",
               "description": [
-                { "language": "en", "text": "Array[1..4] of LReal: current joint angles A1..A4 in mathematical frame (deg)" }
+                { "language": "en", "text": "Array[1..4] of LReal: current joint angles A1..A4 in mathematical frame (deg)" },
+                { "language": "en", "text": "At Home: (0.0, 90.0, -90.0, 0.0) - includes $MAMES offsets (A2=+90, A3=-90)" }
               ]
             },
             {
@@ -298,7 +392,35 @@
               "valueType": "xs:string",
               "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Pos4Maint\"",
               "description": [
-                { "language": "en", "text": "Array[1..4] of LReal: maintenance pose target [X,Y,Z,A]" }
+                { "language": "en", "text": "Array[1..4] of LReal: maintenance pose target [X,Y,Z,A]" },
+                { "language": "en", "text": "Live value: (-486.8, -418.6, 205.0, 0.0)" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Motion_Active",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Motion_Active\"",
+              "description": [
+                { "language": "en", "text": "BOOL: TRUE while the robot is executing a motion" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Emergency_Stop_Active",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Emergency_Stop_Active\"",
+              "description": [
+                { "language": "en", "text": "BOOL: TRUE when E-Stop chain is active" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Error_Code",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Error_Code\"",
+              "description": [
+                { "language": "en", "text": "INT: current error code (0 = no error)" }
               ]
             },
             {
@@ -333,6 +455,87 @@
               "idShort": "Axis4_Fault",
               "valueType": "xs:string",
               "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis4_Fault\""
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis_Limits",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis_Limits\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: per-axis limit proximity flags" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Axis_Power",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Axis_Power\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: per-axis power/current feedback" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "DB_A1",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_DB_A1\"",
+              "description": [
+                { "language": "en", "text": "LReal: dead-band / tolerance for Axis 1" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "DB_A2",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_DB_A2\"",
+              "description": [
+                { "language": "en", "text": "LReal: dead-band / tolerance for Axis 2" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "DB_A3",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_DB_A3\"",
+              "description": [
+                { "language": "en", "text": "LReal: dead-band / tolerance for Axis 3" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "DB_A4",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_DB_A4\"",
+              "description": [
+                { "language": "en", "text": "LReal: dead-band / tolerance for Axis 4" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Dynamic_Speed",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Dynamic_Speed\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: dynamic speed feedback per axis" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "Dynamic_Torque",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_Dynamic_Torque\"",
+              "description": [
+                { "language": "en", "text": "Array[1..4] of LReal: dynamic torque feedback per axis" }
+              ]
+            },
+            {
+              "modelType": "Property",
+              "idShort": "AccessControl",
+              "valueType": "xs:string",
+              "value": "ns=3;s=\"MAIN_KUKA_KR210_L150_L\".\"MainRobotLeft_AccessControl\"",
+              "description": [
+                { "language": "en", "text": "INT: access control level" }
+              ]
             }
           ]
         }
