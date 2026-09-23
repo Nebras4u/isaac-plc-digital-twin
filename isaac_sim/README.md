@@ -92,7 +92,7 @@ At mechanical zero (`A1=0`, `A2=90`, `A3=-90`, `A4=0`):
 
 ### 3.5 Illustration
 
-![Link-3 Geometry Mismatch](isaac_sim/Yaskawa_VS-TIA-Portal.jpg)
+![Link-3 Geometry Mismatch](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/isaac_sim/Yaskawa_VS-TIA-Portal.jpg)
 
 ---
 
@@ -130,7 +130,7 @@ The project is **time-boxed**; cell kinematics is the priority, visualization re
 
 ### 4.4 Illustration
 
-![Hand-Crafted URDF in Isaac Sim](isaac_sim/handcrafted_urdf.jpg)
+![Hand-Crafted URDF in Isaac Sim](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/isaac_sim/handcrafted_urdf.jpg)
 
 ---
 
