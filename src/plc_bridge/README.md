@@ -1,234 +1,163 @@
-# OPC UA ↔ ROS2 Bridge
+## Appendix F — Modular Refactoring: From Monolith to Modular Architecture
+
+### F.1 Context
+
+The original bridge was implemented as a single monolithic Python file (`plc_isaac_ros2_bridge.py`). While functional, it became difficult to maintain, test, and extend. As part of v0.2.2, the codebase was refactored into a modular architecture to support future development (v0.3 IK node, v0.4 suction gripper, v1.1 Real-Time Sync).
+
+### F.2 Motivation for Refactoring
+
+| Problem (Monolith) | Solution (Modular) |
+|---------------------|---------------------|
+| Single 400+ line file | Six focused modules |
+| Hard to test individual components | Each module testable in isolation |
+| PLC/Isaac/Comparison logic mixed | Separation of concerns |
+| Config scattered across file | Centralized in config.py |
+| No clear extension points | Clear interfaces for new features |
+| Duplicate code for similar tasks | Reusable helper functions |
+
+### F.3 New Module Structure
+
+| File | Responsibility | Lines (approx.) |
+|------|----------------|-----------------|
+| config.py | All constants: PLC URL, node IDs, frame names, signs, offsets, joint mappings | ~50 |
+| opcua_bridge.py | OPC UA connection layer: connect / read / write / close | ~60 |
+| plc_view.py | PLC data extraction and display formatting | ~60 |
+| isaac_view.py | Isaac Sim data extraction, frame conversion, quaternion math | ~130 |
+| comparator.py | Joint/TCP/Frame comparison tables | ~110 |
+| main.py | Entry point: orchestrates asyncio + ROS2 threads | ~150 |
+
+### F.4 Architecture Diagram
+
++-----------------------------------------------------------------+
+|                         main.py                                 |
+|  +--------------+    +--------------+    +--------------+       |
+|  |  asyncio     |    |  ROS2 Thread |    |  OpcUaBridge |       |
+|  |  main_loop() |<-->|  (daemon)    |    |  (async)     |       |
+|  +------+-------+    +------+-------+    +------+-------+       |
+|         |                   |                   |               |
+|         v                   v                   v               |
+|  +--------------+    +--------------+    +--------------+       |
+|  |  plc_view.py |    | isaac_view.py|    |  config.py   |       |
+|  |  extract +   |    |  extract +   |    |  (constants) |       |
+|  |  print       |    |  convert +   |    |              |       |
+|  +------+-------+    |  print       |    +--------------+       |
+|         |            +------+-------+                           |
+|         |                   |                                   |
+|         v                   v                                   |
+|  +-----------------------------------------+                    |
+|  |           comparator.py                 |                    |
+|  |  joint + TCP + frame comparison tables  |                    |
+|  +-----------------------------------------+                    |
++-----------------------------------------------------------------+
+
+### F.5 Key Design Decisions
+
+#### F.5.1 Single Source of Truth (config.py)
+
+All tunable parameters live in one place:
+
+# PLC connection
+PLC_URL = "opc.tcp://111.111.111.10:4840"
+NS = 3
+DB_TCP = "MAIN_KUKA_KR210_L150_L"
+
+# Frame definitions
+WORLD_FRAME = "base_link"
+TCP_FRAME = "tool"
+TRACKED_FRAMES = ["base_link", "link_1", "link_2", "link_3", "link_4", "tool"]
+
+# Joint mapping
+PLC_TO_ROS = {"A1": "joint_1", "A2": "joint_2", "A3": "joint_3", "A4": "joint_4"}
+
+# Signs and offsets
+JOINT_SIGN = {"A1": +1.0, "A2": -1.0, "A3": -1.0, "A4": +1.0}
+MAMES_DEG = {"A1": 0.0, "A2": 0.0, "A3": 0.0, "A4": 0.0}
+ISAAC_HOME_OFFSET = {"A1": 0.0, "A2": 0.0, "A3": 0.0, "A4": 0.0}
+
+Benefit: Changing a joint mapping or a sign requires editing one line in one file.
+
+#### F.5.2 Separation of Data Extraction and Display
+
+Each view module (plc_view.py, isaac_view.py) provides:
+- extract_*() — pure data extraction (no printing)
+- print_*() — display formatting (no data logic)
+
+Benefit: Data can be used by other consumers (e.g., v0.3 IK node) without pulling in printing logic.
+
+#### F.5.3 OPC UA Layer Isolation
+
+opcua_bridge.py exposes a clean async interface:
+
+class OpcUaBridge:
+    async def connect(self)
+    async def close(self)
+    async def read_arrays(self) -> dict
+    async def read_flags(self) -> dict
+    async def read_all(self) -> tuple[dict, dict]
+    async def write(self, node_id: str, value)
+
+Benefit: The write() method is ready for future bidirectional control (v1.1 Real-Time Sync) without refactoring.
+
+#### F.5.4 Comparison Layer Independence
+
+comparator.py receives plc_data and isaac_data dicts, making it:
+- Testable with synthetic data
+- Reusable for logging to CSV/JSON
+- Independent of OPC UA or ROS2
+
+### F.6 Migration from Monolith
+
+| Old (Monolith) | New (Modular) |
+|----------------|---------------|
+| PLC_URL, NS, DB_TCP inline | config.py |
+| MAMES_DEG, ISAAC_HOME_OFFSET inline | config.py |
+| PLC_TO_ROS inline | config.py |
+| kuka_math_to_mech() inline | plc_view.py |
+| isaac_raw_to_mech() inline | isaac_view.py |
+| quat_to_kuka_a() inline | isaac_view.py |
+| arr4(), fmt() inline | plc_view.py / comparator.py |
+| OPC UA loop inline | opcua_bridge.py |
+| Comparison table inline | comparator.py |
+| JointStateListener inline | main.py |
+
+### F.7 How to Extend
+
+| Future Feature | Where to Add |
+|----------------|--------------|
+| New PLC variable | config.py -> PLC_ARRAYS or PLC_FLAGS |
+| New joint mapping | config.py -> PLC_TO_ROS |
+| New frame to track | config.py -> TRACKED_FRAMES |
+| New comparison metric | comparator.py -> new print_*() function |
+| Write-back to PLC | opcua_bridge.py -> use existing write() |
+| CSV logging | main.py -> call comparator functions, save output |
+| IK node (v0.3) | New module ik_node.py, import isaac_view |
+| A5 kinematics | config.py -> add compute_A5() helper |
+
+### F.8 Benefits Realized
+
+| Benefit | Impact |
+|---------|--------|
+| Maintainability | Each file < 150 lines, single responsibility |
+| Testability | Each module can be unit-tested independently |
+| Readability | Clear data flow: config -> extract -> convert -> compare -> print |
+| Extensibility | New features plug in without touching existing modules |
+| Reusability | isaac_view, comparator usable by future IK/logging nodes |
+| Team collaboration | Multiple developers can work on separate modules |
+
+### F.9 Lessons Learned
+
+| # | Lesson |
+|---|--------|
+| 1 | Start modular early — refactoring later costs more than designing modular from the start. |
+| 2 | Config centralization prevents bugs from scattered magic numbers. |
+| 3 | Separating data from display enables reuse in non-printing contexts. |
+| 4 | Clean interfaces (OpcUaBridge.write) future-proof the codebase. |
+| 5 | Small focused modules are easier to debug than large monolithic files. |
+| 6 | Comparison layer independence enables unit tests with synthetic data. |
+
+### F.10 References
+
+- Original monolith: plc_isaac_ros2_bridge.py (deprecated)
+- Modular version: config.py, opcua_bridge.py, plc_view.py, isaac_view.py, comparator.py, main.py
+- Related appendices: Appendix E (Hidden A5 Problem), Appendix D (Zero-Pose Validation)
 
-**Purpose**: Bidirectional bridge between **Siemens S7-1500T (OPC UA)** and **Isaac Sim (ROS2)**.  
-Reads PLC telemetry, reads Isaac `/joint_states`, converts reference frames, prints comparison table.
-
-**File**: `bridge.py`  
-**Runtime**: Python 3.8+ | `asyncua` | `rclpy`
-
----
-
-## Overview
-
-```
-S7-1500T ──OPC UA──▶ [bridge.py] ──ROS2──▶ Isaac Sim
-   ActPos              convert              /joint_states
-   ActAng               frames
-   Flags
-```
-
-**Loop rate**: 5 Hz (200 ms per cycle).
-
----
-
-## Configuration
-
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `PLC_URL` | `opc.tcp://111.111.111.10:4840` | OPC UA endpoint |
-| `NS` | `3` | Namespace index |
-| `DB_TCP` | `MAIN_KUKA_KR210_L150_L` | TIA Portal DB name |
-
-### Read from PLC
-
-**Arrays** (`PLC_ARRAYS`):
-- `MainRobotLeft_ActPos` — TCP [X, Y, Z, A]
-- `MainRobotLeft_ActAng` — Joint angles [A1..A4] (math frame)
-- `MainRobotLeft_Pos4Maint` — Maintenance pose
-
-**Flags** (`PLC_FLAGS`):
-- `MainRobotLeft_Go2Pos4Maint`
-- `MainRobotLeft_Group_Fault`
-- `MainRobotLeft_Axis1..4_Fault`
-
-### NodeId Pattern
-
-```
-ns=3;s="MAIN_KUKA_KR210_L150_L"."<Variable>"
-```
-
----
-
-## Reference Frames
-
-Three frames exist; conversion is required for correct comparison.
-
-### 1. KUKA Mathematical (PLC)
-
-Angles inside the controller and PLC. **Not** the physical robot angle.
-
-### 2. KUKA Mechanical (Physical)
-
-Physical mastering zero position. Related by `$MAMES`:
-
-```
-Q_mechanical = Q_mathematical - $MAMES
-```
-
-**$MAMES** (from `$MACHINE.DAT`):
-
-| Axis | Value (deg) |
-|------|-------------|
-| A1 | 0.0 |
-| A2 | -90.0 |
-| A3 | +90.0 |
-| A4 | 0.0 |
-
-### 3. Isaac Raw (ROS2)
-
-Isaac URDF zero ≠ KUKA mechanical zero. Offset removed by:
-
-```
-Q_mech = Q_isaac_raw - ISAAC_HOME_OFFSET
-```
-
-**ISAAC_HOME_OFFSET** (measured at Isaac home pose):
-
-| Axis | Value (deg) |
-|------|-------------|
-| A1 | +0.802 |
-| A2 | +5.105 |
-| A3 | -5.094 |
-| A4 | -1.702 |
-
-**After both conversions**: PLC and Isaac are in the **same mechanical frame** → comparison is valid.
-
----
-
-## Axis Mapping
-
-| PLC | ROS / Isaac |
-|-----|-------------|
-| A1 | joint_a1 |
-| A2 | joint_a2 |
-| A3 | joint_a3 |
-| A4 | joint_a4 |
-
-(`A5`, `A6` mapped but unused.)
-
----
-
-## Key Functions
-
-| Function | Purpose |
-|----------|---------|
-| `kuka_math_to_mech(q_math_deg)` | Subtract `$MAMES` |
-| `isaac_raw_to_mech(q_ros_deg)` | Subtract `ISAAC_HOME_OFFSET` |
-| `fmt(v, nd=3)` | Format float to `nd` decimals |
-| `arr4(vals)` | Pad list to exactly 4 items |
-
----
-
-## Threading Model
-
-```
-Main Thread                    ROS Thread (daemon)
-─────────────                  ────────────────────
-asyncio loop                   rclpy.spin_once()
-  │                              │
-  ▼                              ▼
-opcua_loop()                   JointStateListener
-  │                              │
-  ├─ read PLC arrays             ├─ subscribe /joint_states
-  ├─ read PLC flags              └─ store msg in holder["msg"]
-  ├─ read holder["msg"]
-  ├─ convert frames
-  ├─ print table
-  └─ sleep 0.2s
-```
-
-- **`holder`**: dict shared between threads (`{"msg": JointState}`)
-- **`stop_event`**: `threading.Event` for graceful shutdown
-- **`SignalHandlerOptions.NO`**: Ctrl+C goes to asyncio, not ROS
-
----
-
-## Main Loop (per iteration)
-
-1. **Read arrays** — 1 network round-trip (`read_values`)
-2. **Read flags** — 1 network round-trip
-3. **Extract** — `arr4()` ensures 4-element lists
-4. **PLC convert** — math → mechanical
-5. **ROS read** — from `holder["msg"]`, rad → deg → mechanical
-6. **Print snapshot** — ActPos, ActAng, Pos4Maint, Flags
-7. **Print table** — per-axis comparison (PLC math/mech vs ROS raw/mech, delta)
-8. **Sleep 200 ms**
-
----
-
-## Sample Output
-
-```
-================================================================================
-PLC ActPos [mm/deg] : X=450.000  Y=0.000  Z=712.000  A=0.000
-PLC ActAng (math)   : A1=0.000, A2=90.000, A3=-90.000, A4=0.000
-PLC Pos4Maint       : ['-486.800', '-418.600', '205.000', '0.000']
-PLC Flags           : {'MainRobotLeft_Group_Fault': False, ...}
---------------------------------------------------------------------------------
-Axis     PLC math   PLC mech     ROS raw    ROS mech   Δ(PLC-ROS)
-A1          0.000      0.000       0.802       0.000         0.000
-A2         90.000    180.000      95.105     180.000         0.000
-A3        -90.000   -180.000     -95.094    -180.000         0.000
-A4          0.000      0.000      -1.702       0.000         0.000
-================================================================================
-```
-
-Delta ≈ 0 → frames aligned ✅
-
----
-
-## Run
-
-```bash
-# Terminal 1: Isaac Sim publishing /joint_states
-# Terminal 2:
-python3 bridge.py
-```
-
-**Requirements**: `pip install asyncua` + ROS2 installed and sourced.
-
-**Shutdown**: `Ctrl+C` → signals `stop_event` → ROS thread joins (2 s timeout).
-
----
-
-## Known Limitations
-
-| Issue | Note |
-|-------|------|
-| Hardcoded endpoint | `PLC_URL` not configurable via CLI |
-| Read-only | No write-back to PLC implemented |
-| Print-only | No logging / file output |
-| 4 axes only | A5/A6 mapped but unused in this robot |
-| No reconnect | Connection lost → script exits |
-| Fixed 5 Hz | Not adaptive to load |
-
----
-
-## Data Flow Reference (AAS Alignment)
-
-| Bridge reads | AAS Path | Submodel |
-|--------------|----------|----------|
-| `MainRobotLeft_ActPos` | `Status/MainRobotLeft/ActPos` | `Status.json` |
-| `MainRobotLeft_ActAng` | `Status/MainRobotLeft/ActAng` | `Status.json` |
-| `MainRobotLeft_Group_Fault` | `Status/MainRobotLeft/Group_Fault` | `Status.json` |
-| `$MAMES` | `DigitalTwin_Config/KUKA_Mastering` | `DigitalTwin_Config.json` |
-| `ISAAC_HOME_OFFSET` | `DigitalTwin_Config/IsaacSim_HomeOffset` | `DigitalTwin_Config.json` |
-
-**Full AAS**: `/aas/KUKA_KR210_L150_L.json`
-
----
-
-## Conversion Formulas (Summary)
-
-```
-PLC math  →  PLC mech:     Q_mech = Q_math  - $MAMES
-ROS raw   →  ROS mech:     Q_mech = Q_raw   - ISAAC_HOME_OFFSET
-Delta:                     Δ      = PLC_mech - ROS_mech
-```
-
-Both endpoints in **mechanical frame** → comparison meaningful.
-
----
-
-**Repository**: https://github.com/Nebras4u/isaac-plc-digital-twin  
-**Last updated**: 2026-09-19
