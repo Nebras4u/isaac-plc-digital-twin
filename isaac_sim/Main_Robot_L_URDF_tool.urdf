@@ -1,0 +1,255 @@
+<?xml version="1.0"?>
+<!-- 4-axis approximation of KUKA KR 210 L150
+     Links merged: original L3+L4 → forearm, L5+L6 → wrist/tool
+     Masses scaled to realistic total ≈ 1410 kg
+     Kinematics: L1=0.675  L2=0.350  L3=1.350  L4=1.400  LF=0.200 (Updated)
+-->
+<robot name="Main_Robot_L_URDF">
+
+  <material name="kuka_orange"><color rgba="0.95 0.40 0.05 1"/></material>
+  <material name="kuka_dark"><color rgba="0.18 0.18 0.18 1"/></material>
+  <material name="kuka_grey"><color rgba="0.45 0.45 0.45 1"/></material>
+  <material name="kuka_light"><color rgba="0.65 0.65 0.65 1"/></material>
+
+  <!-- ========== BASE ========== -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.04"/>
+      <geometry><cylinder radius="0.42" length="0.08"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04"/>
+      <geometry><cylinder radius="0.42" length="0.08"/></geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 0 0.28"/>
+      <geometry><cylinder radius="0.30" length="0.40"/></geometry>
+      <material name="kuka_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.28"/>
+      <geometry><cylinder radius="0.30" length="0.40"/></geometry>
+    </collision>
+    <visual>
+      <origin xyz="0 0 0.50"/>
+      <geometry><cylinder radius="0.32" length="0.06"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <inertial>
+      <origin xyz="-0.02 0 0.20"/>
+      <mass value="380"/>
+      <inertia ixx="18" iyy="18" izz="15" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== JOINT 1 (A1) ========== -->
+  <joint name="joint1" type="revolute">
+    <parent link="base_link"/><child link="link1"/>
+    <origin xyz="0 0 0.53"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.22886" upper="3.22886" effort="10000" velocity="2.0"/>
+  </joint>
+
+  <!-- ========== LINK 1 ========== -->
+  <link name="link1">
+    <visual>
+      <origin xyz="0 0 0.18"/>
+      <geometry><cylinder radius="0.24" length="0.36"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.18"/>
+      <geometry><cylinder radius="0.24" length="0.36"/></geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.18 0 0.145"/>
+      <geometry><box size="0.42 0.38 0.32"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0.18 0 0.145"/>
+      <geometry><box size="0.42 0.38 0.32"/></geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.05 0.22 0.14"/>
+      <geometry><box size="0.22 0.08 0.28"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <visual>
+      <origin xyz="0.05 -0.22 0.14"/>
+      <geometry><box size="0.22 0.08 0.28"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <inertial>
+      <origin xyz="-0.03 -0.02 0.20"/>
+      <mass value="340"/>
+      <inertia ixx="28" iyy="30" izz="14" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== JOINT 2 (A2) ========== -->
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/><child link="upper_arm"/>
+    <origin xyz="0.350 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.28122" upper="0.61087" effort="25000" velocity="2.0"/>
+  </joint>
+
+  <!-- ========== UPPER ARM ========== -->
+  <link name="upper_arm">
+    <visual>
+      <origin xyz="0.675 0 0"/>
+      <geometry><box size="1.30 0.26 0.24"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0.675 0 0"/>
+      <geometry><box size="1.30 0.26 0.24"/></geometry>
+    </collision>
+    <visual>
+      <!-- تصحيح دوران الأسطوانة التجميلية للمفصل ليصبح على محور Y -->
+      <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.16" length="0.34"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <visual>
+      <!-- تصحيح دوران الأسطوانة التجميلية للمفصل الثالث ليصبح على محور Y -->
+      <origin xyz="1.27 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.14" length="0.30"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <visual>
+      <origin xyz="0.50 0.15 0"/>
+      <geometry><box size="0.70 0.04 0.18"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <visual>
+      <origin xyz="0.50 -0.15 0"/>
+      <geometry><box size="0.70 0.04 0.18"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.02 -0.12 0.30"/>
+      <mass value="280"/>
+      <inertia ixx="5" iyy="48" izz="48" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== JOINT 3 (A3) ========== -->
+  <joint name="joint3" type="revolute">
+    <parent link="upper_arm"/><child link="forearm"/>
+    <origin xyz="1.350 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-2.0" upper="2.5" effort="9000" velocity="2.0"/>
+  </joint>
+
+  <!-- ========== FOREARM ========== -->
+  <link name="forearm">
+    <visual>
+      <origin xyz="0.70 0 0"/>
+      <geometry><box size="1.35 0.20 0.18"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0.70 0 0"/>
+      <geometry><box size="1.35 0.20 0.18"/></geometry>
+    </collision>
+    <visual>
+      <origin xyz="0.06 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.13" length="0.28"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <visual>
+      <origin xyz="1.34 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.12" length="0.26"/></geometry>
+      <material name="kuka_orange"/>
+    </visual>
+    <visual>
+      <origin xyz="0.70 0 0.11"/>
+      <geometry><box size="1.20 0.08 0.04"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.40 0.10 -0.03"/>
+      <mass value="260"/>
+      <inertia ixx="3" iyy="45" izz="45" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== WRIST_COMP (A5) ========== -->
+  <joint name="A5" type="revolute">
+    <parent link="forearm"/><child link="wrist"/>
+    <origin xyz="1.400 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-6.3" upper="6.3" effort="1500" velocity="4.0"/>
+  </joint>
+
+  <!-- ========== WRIST ========== -->
+  <link name="wrist">
+    <visual>
+      <!-- تم تحويل الهندسة إلى أسطوانة بقطر 240 ملم وطول 200 ملم وتدويرها على محور Y -->
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.12" length="0.20"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.12" length="0.20"/></geometry>
+    </collision>
+    <visual>
+      <!-- قاعدة المعصم الممتدة لأسفل -->
+      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.10" length="0.08"/></geometry>
+      <material name="kuka_grey"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.05 0.02 0"/>
+      <mass value="80"/>
+      <inertia ixx="0.4" iyy="0.4" izz="0.3" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== JOINT 4 (A4) ========== -->
+  <joint name="joint4" type="revolute">
+    <parent link="wrist"/><child link="tool"/>
+    <!-- تم نقل نقطة تموضع الأداة لتكون أسفل المعصم مباشرة بـ 0.08 م -->
+    <origin xyz="0 0 -0.08"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.10865" upper="6.10865" effort="800" velocity="6.0"/>
+  </joint>
+
+  <!-- ========== TOOL (المحدث بطول 200 ملم ممتد لأسفل عمودياً) ========== -->
+  <link name="tool">
+    <visual>
+      <!-- الأسطوانة ممتدة لأسفل بمقدار 200 ملم تماماً ومحاذية للمحور Z المحلي -->
+      <origin xyz="0 0 -0.10"/>
+      <geometry><cylinder radius="0.075" length="0.20"/></geometry>
+      <material name="kuka_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.10"/>
+      <geometry><cylinder radius="0.075" length="0.20"/></geometry>
+    </collision>
+    <visual>
+      <!-- حافة نهاية الأداة الطرفية -->
+      <origin xyz="0 0 -0.20"/>
+      <geometry><cylinder radius="0.04" length="0.02"/></geometry>
+      <material name="kuka_dark"/>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 -0.10"/>
+      <mass value="20"/>
+      <inertia ixx="0.08" iyy="0.08" izz="0.05" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <!-- ========== TCP FIXED FRAME (LF = 200mm) ========== -->
+  <joint name="tcp_fixed" type="fixed">
+    <parent link="tool"/><child link="tcp"/>
+    <!-- نقطة الحساب الكارتيزية على بعد 200 ملم تماماً من بداية الأداة -->
+    <origin xyz="0 0 -0.200"/>
+  </joint>
+  <link name="tcp"/>
+
+</robot>
