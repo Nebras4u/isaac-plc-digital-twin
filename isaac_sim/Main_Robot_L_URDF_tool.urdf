@@ -1,8 +1,28 @@
 <?xml version="1.0"?>
 <!-- 4-axis approximation of KUKA KR 210 L150
-     Links merged: original L3+L4 → forearm, L5+L6 → wrist/tool
+     Links merged: original L3+L4 → link_3, L5+L6 → link_4/tool
      Masses scaled to realistic total ≈ 1410 kg
-     Kinematics: L1=0.675  L2=0.350  L3=1.350  L4=1.400  LF=0.200 (Updated)
+     Kinematics: L1=0.675  L2=0.350  L3=1.350  L4=1.400  LF=0.089084 (Updated)
+
+     v0.3.0 — tool is now the TCP directly.
+     joint_4 origin = (0, 0, -0.089084) matches PLC LF.
+     tcp_fixed and tcp link removed.
+
+     Joint rename map:
+       joint1 -> joint_1
+       joint2 -> joint_2
+       joint3 -> joint_3
+       A5     -> joint_5
+       joint4 -> joint_4
+     Link rename map:
+       link1     -> link_1
+       upper_arm -> link_2
+       forearm   -> link_3
+       wrist     -> link_4
+
+     Drive parameters (Isaac Sim):
+       joint_1: Max Force = 50000
+       all joints: Damping = 100000, Stiffness = 1000000
 -->
 <robot name="Main_Robot_L_URDF">
 
@@ -43,16 +63,17 @@
     </inertial>
   </link>
 
-  <!-- ========== JOINT 1 (A1) ========== -->
-  <joint name="joint1" type="revolute">
-    <parent link="base_link"/><child link="link1"/>
+  <!-- ========== JOINT_1 (A1) ========== -->
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/><child link="link_1"/>
     <origin xyz="0 0 0.53"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-3.22886" upper="3.22886" effort="10000" velocity="2.0"/>
+    <limit lower="-3.22886" upper="3.22886" effort="50000" velocity="2.0"/>
+    <dynamics damping="100000" stiffness="1000000"/>
   </joint>
 
-  <!-- ========== LINK 1 ========== -->
-  <link name="link1">
+  <!-- ========== LINK_1 ========== -->
+  <link name="link_1">
     <visual>
       <origin xyz="0 0 0.18"/>
       <geometry><cylinder radius="0.24" length="0.36"/></geometry>
@@ -88,16 +109,17 @@
     </inertial>
   </link>
 
-  <!-- ========== JOINT 2 (A2) ========== -->
-  <joint name="joint2" type="revolute">
-    <parent link="link1"/><child link="upper_arm"/>
+  <!-- ========== JOINT_2 (A2) ========== -->
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1"/><child link="link_2"/>
     <origin xyz="0.350 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-3.28122" upper="0.61087" effort="25000" velocity="2.0"/>
+    <dynamics damping="100000" stiffness="1000000"/>
   </joint>
 
-  <!-- ========== UPPER ARM ========== -->
-  <link name="upper_arm">
+  <!-- ========== LINK_2 (formerly upper_arm) ========== -->
+  <link name="link_2">
     <visual>
       <origin xyz="0.675 0 0"/>
       <geometry><box size="1.30 0.26 0.24"/></geometry>
@@ -108,13 +130,11 @@
       <geometry><box size="1.30 0.26 0.24"/></geometry>
     </collision>
     <visual>
-      <!-- تصحيح دوران الأسطوانة التجميلية للمفصل ليصبح على محور Y -->
       <origin xyz="0.08 0 0" rpy="1.5708 0 0"/>
       <geometry><cylinder radius="0.16" length="0.34"/></geometry>
       <material name="kuka_orange"/>
     </visual>
     <visual>
-      <!-- تصحيح دوران الأسطوانة التجميلية للمفصل الثالث ليصبح على محور Y -->
       <origin xyz="1.27 0 0" rpy="1.5708 0 0"/>
       <geometry><cylinder radius="0.14" length="0.30"/></geometry>
       <material name="kuka_orange"/>
@@ -136,16 +156,17 @@
     </inertial>
   </link>
 
-  <!-- ========== JOINT 3 (A3) ========== -->
-  <joint name="joint3" type="revolute">
-    <parent link="upper_arm"/><child link="forearm"/>
+  <!-- ========== JOINT_3 (A3) ========== -->
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2"/><child link="link_3"/>
     <origin xyz="1.350 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-2.0" upper="2.5" effort="9000" velocity="2.0"/>
+    <dynamics damping="100000" stiffness="1000000"/>
   </joint>
 
-  <!-- ========== FOREARM ========== -->
-  <link name="forearm">
+  <!-- ========== LINK_3 (formerly forearm) ========== -->
+  <link name="link_3">
     <visual>
       <origin xyz="0.70 0 0"/>
       <geometry><box size="1.35 0.20 0.18"/></geometry>
@@ -177,18 +198,18 @@
     </inertial>
   </link>
 
-  <!-- ========== WRIST_COMP (A5) ========== -->
-  <joint name="A5" type="revolute">
-    <parent link="forearm"/><child link="wrist"/>
+  <!-- ========== JOINT_5 (A5) ========== -->
+  <joint name="joint_5" type="revolute">
+    <parent link="link_3"/><child link="link_4"/>
     <origin xyz="1.400 0 0"/>
     <axis xyz="0 1 0"/>
     <limit lower="-6.3" upper="6.3" effort="1500" velocity="4.0"/>
+    <dynamics damping="100000" stiffness="1000000"/>
   </joint>
 
-  <!-- ========== WRIST ========== -->
-  <link name="wrist">
+  <!-- ========== LINK_4 (formerly wrist) ========== -->
+  <link name="link_4">
     <visual>
-      <!-- تم تحويل الهندسة إلى أسطوانة بقطر 240 ملم وطول 200 ملم وتدويرها على محور Y -->
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry><cylinder radius="0.12" length="0.20"/></geometry>
       <material name="kuka_dark"/>
@@ -198,7 +219,6 @@
       <geometry><cylinder radius="0.12" length="0.20"/></geometry>
     </collision>
     <visual>
-      <!-- قاعدة المعصم الممتدة لأسفل -->
       <origin xyz="0 0 -0.04" rpy="0 0 0"/>
       <geometry><cylinder radius="0.10" length="0.08"/></geometry>
       <material name="kuka_grey"/>
@@ -210,46 +230,37 @@
     </inertial>
   </link>
 
-  <!-- ========== JOINT 4 (A4) ========== -->
-  <joint name="joint4" type="revolute">
-    <parent link="wrist"/><child link="tool"/>
-    <!-- تم نقل نقطة تموضع الأداة لتكون أسفل المعصم مباشرة بـ 0.08 م -->
-    <origin xyz="0 0 -0.08"/>
+  <!-- ========== JOINT_4 (A4) ========== -->
+  <!-- Tool is now the TCP directly: offset = LF = 89.084 mm -->
+  <joint name="joint_4" type="revolute">
+    <parent link="link_4"/><child link="tool"/>
+    <origin xyz="0 0 -0.089084"/>
     <axis xyz="0 0 1"/>
     <limit lower="-6.10865" upper="6.10865" effort="800" velocity="6.0"/>
+    <dynamics damping="100000" stiffness="1000000"/>
   </joint>
 
-  <!-- ========== TOOL (المحدث بطول 200 ملم ممتد لأسفل عمودياً) ========== -->
+  <!-- ========== TOOL (is the TCP) ========== -->
   <link name="tool">
     <visual>
-      <!-- الأسطوانة ممتدة لأسفل بمقدار 200 ملم تماماً ومحاذية للمحور Z المحلي -->
-      <origin xyz="0 0 -0.10"/>
-      <geometry><cylinder radius="0.075" length="0.20"/></geometry>
+      <origin xyz="0 0 -0.044542"/>
+      <geometry><cylinder radius="0.075" length="0.089084"/></geometry>
       <material name="kuka_grey"/>
     </visual>
     <collision>
-      <origin xyz="0 0 -0.10"/>
-      <geometry><cylinder radius="0.075" length="0.20"/></geometry>
+      <origin xyz="0 0 -0.044542"/>
+      <geometry><cylinder radius="0.075" length="0.089084"/></geometry>
     </collision>
     <visual>
-      <!-- حافة نهاية الأداة الطرفية -->
-      <origin xyz="0 0 -0.20"/>
+      <origin xyz="0 0 -0.089084"/>
       <geometry><cylinder radius="0.04" length="0.02"/></geometry>
       <material name="kuka_dark"/>
     </visual>
     <inertial>
-      <origin xyz="0 0 -0.10"/>
+      <origin xyz="0 0 -0.044542"/>
       <mass value="20"/>
       <inertia ixx="0.08" iyy="0.08" izz="0.05" ixy="0" ixz="0" iyz="0"/>
     </inertial>
   </link>
-
-  <!-- ========== TCP FIXED FRAME (LF = 200mm) ========== -->
-  <joint name="tcp_fixed" type="fixed">
-    <parent link="tool"/><child link="tcp"/>
-    <!-- نقطة الحساب الكارتيزية على بعد 200 ملم تماماً من بداية الأداة -->
-    <origin xyz="0 0 -0.200"/>
-  </joint>
-  <link name="tcp"/>
 
 </robot>

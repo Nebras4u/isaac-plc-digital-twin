@@ -6,25 +6,25 @@ The original bridge was implemented as a single monolithic Python file (`plc_isa
 
 ### F.2 Motivation for Refactoring
 
-| Problem (Monolith) | Solution (Modular) |
-|---------------------|---------------------|
-| Single 400+ line file | Six focused modules |
+| Problem (Monolith)                 | Solution (Modular)                |
+|------------------------------------|-----------------------------------|
+| Single 400+ line file              | Six focused modules               |
 | Hard to test individual components | Each module testable in isolation |
-| PLC/Isaac/Comparison logic mixed | Separation of concerns |
-| Config scattered across file | Centralized in config.py |
-| No clear extension points | Clear interfaces for new features |
-| Duplicate code for similar tasks | Reusable helper functions |
+| PLC/Isaac/Comparison logic mixed   | Separation of concerns            |
+| Config scattered across file       | Centralized in config.py          |
+| No clear extension points          | Clear interfaces for new features |
+| Duplicate code for similar tasks   | Reusable helper functions         |
 
 ### F.3 New Module Structure
 
-| File | Responsibility | Lines (approx.) |
-|------|----------------|-----------------|
-| config.py | All constants: PLC URL, node IDs, frame names, signs, offsets, joint mappings | ~50 |
-| opcua_bridge.py | OPC UA connection layer: connect / read / write / close | ~60 |
-| plc_view.py | PLC data extraction and display formatting | ~60 |
-| isaac_view.py | Isaac Sim data extraction, frame conversion, quaternion math | ~130 |
-| comparator.py | Joint/TCP/Frame comparison tables | ~110 |
-| main.py | Entry point: orchestrates asyncio + ROS2 threads | ~150 |
+| File            | Responsibility                                                                | Lines (approx.) |
+|-----------------|-------------------------------------------------------------------------------|-----------------|
+| config.py       | All constants: PLC URL, node IDs, frame names, signs, offsets, joint mappings | ~50             |
+| opcua_bridge.py | OPC UA connection layer: connect / read / write / close                       | ~60             |
+| plc_view.py     | PLC data extraction and display formatting                                    | ~60             |
+| isaac_view.py   | Isaac Sim data extraction, frame conversion, quaternion math                  | ~130            |
+| comparator.py   | Joint/TCP/Frame comparison tables                                             | ~110            |
+| main.py         | Entry point: orchestrates asyncio + ROS2 threads                              | ~150            |
 
 ### F.4 Architecture Diagram
 
@@ -107,53 +107,53 @@ comparator.py receives plc_data and isaac_data dicts, making it:
 
 ### F.6 Migration from Monolith
 
-| Old (Monolith) | New (Modular) |
-|----------------|---------------|
-| PLC_URL, NS, DB_TCP inline | config.py |
-| MAMES_DEG, ISAAC_HOME_OFFSET inline | config.py |
-| PLC_TO_ROS inline | config.py |
-| kuka_math_to_mech() inline | plc_view.py |
-| isaac_raw_to_mech() inline | isaac_view.py |
-| quat_to_kuka_a() inline | isaac_view.py |
-| arr4(), fmt() inline | plc_view.py / comparator.py |
-| OPC UA loop inline | opcua_bridge.py |
-| Comparison table inline | comparator.py |
-| JointStateListener inline | main.py |
+| Old (Monolith)                      | New (Modular)               |
+|-------------------------------------|-----------------------------|
+| PLC_URL, NS, DB_TCP inline          | config.py                   |
+| MAMES_DEG, ISAAC_HOME_OFFSET inline | config.py                   |
+| PLC_TO_ROS inline                   | config.py                   |
+| kuka_math_to_mech() inline          | plc_view.py                 |
+| isaac_raw_to_mech() inline          | isaac_view.py               |
+| quat_to_kuka_a() inline             | isaac_view.py               |
+| arr4(), fmt() inline                | plc_view.py / comparator.py |
+| OPC UA loop inline                  | opcua_bridge.py             |
+| Comparison table inline             | comparator.py               |
+| JointStateListener inline           | main.py                     |
 
 ### F.7 How to Extend
 
-| Future Feature | Where to Add |
-|----------------|--------------|
-| New PLC variable | config.py -> PLC_ARRAYS or PLC_FLAGS |
-| New joint mapping | config.py -> PLC_TO_ROS |
-| New frame to track | config.py -> TRACKED_FRAMES |
-| New comparison metric | comparator.py -> new print_*() function |
-| Write-back to PLC | opcua_bridge.py -> use existing write() |
-| CSV logging | main.py -> call comparator functions, save output |
-| IK node (v0.3) | New module ik_node.py, import isaac_view |
-| A5 kinematics | config.py -> add compute_A5() helper |
+| Future Feature        | Where to Add                                      |
+|-----------------------|---------------------------------------------------|
+| New PLC variable      | config.py -> PLC_ARRAYS or PLC_FLAGS              |
+| New joint mapping     | config.py -> PLC_TO_ROS                           |
+| New frame to track    | config.py -> TRACKED_FRAMES                       |
+| New comparison metric | comparator.py -> new print_*() function           |
+| Write-back to PLC     | opcua_bridge.py -> use existing write()           |
+| CSV logging           | main.py -> call comparator functions, save output |
+| IK node (v0.3)        | New module ik_node.py, import isaac_view          |
+| A5 kinematics         | config.py -> add compute_A5() helper              |
 
 ### F.8 Benefits Realized
 
-| Benefit | Impact |
-|---------|--------|
-| Maintainability | Each file < 150 lines, single responsibility |
-| Testability | Each module can be unit-tested independently |
-| Readability | Clear data flow: config -> extract -> convert -> compare -> print |
-| Extensibility | New features plug in without touching existing modules |
-| Reusability | isaac_view, comparator usable by future IK/logging nodes |
-| Team collaboration | Multiple developers can work on separate modules |
+| Benefit            | Impact                                                            |
+|--------------------|-------------------------------------------------------------------|
+| Maintainability    | Each file < 150 lines, single responsibility                      |
+| Testability        | Each module can be unit-tested independently                      |
+| Readability        | Clear data flow: config -> extract -> convert -> compare -> print |
+| Extensibility      | New features plug in without touching existing modules            |
+| Reusability        | isaac_view, comparator usable by future IK/logging nodes          |
+| Team collaboration | Multiple developers can work on separate modules                  |
 
 ### F.9 Lessons Learned
 
-| # | Lesson |
-|---|--------|
+| # | Lesson                                                                                    |
+|---|-------------------------------------------------------------------------------------------|
 | 1 | Start modular early — refactoring later costs more than designing modular from the start. |
-| 2 | Config centralization prevents bugs from scattered magic numbers. |
-| 3 | Separating data from display enables reuse in non-printing contexts. |
-| 4 | Clean interfaces (OpcUaBridge.write) future-proof the codebase. |
-| 5 | Small focused modules are easier to debug than large monolithic files. |
-| 6 | Comparison layer independence enables unit tests with synthetic data. |
+| 2 | Config centralization prevents bugs from scattered magic numbers.                         |
+| 3 | Separating data from display enables reuse in non-printing contexts.                      |
+| 4 | Clean interfaces (OpcUaBridge.write) future-proof the codebase.                           |
+| 5 | Small focused modules are easier to debug than large monolithic files.                    |
+| 6 | Comparison layer independence enables unit tests with synthetic data.                     |
 
 ### F.10 References
 

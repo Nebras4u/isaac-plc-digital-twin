@@ -80,13 +80,13 @@ Compare -> delta ~= 0 deg -> Validated
 
 ### 4.1 Rename Joint 6 to Joint 4
 
-| New name | Role | Driven by |
-|---|---|---|
-| joint_1 | A1 — base rotation | PLC |
-| joint_2 | A2 — shoulder | PLC |
-| joint_3 | A3 — elbow | PLC |
-| joint_4 | A4 — tool roll (was joint_6) | PLC |
-| joint_5 | A5 — hidden tool axis | Python |
+| New name| Role                         | Driven by |
+|---------|------------------------------|-----------|
+| joint_1 | A1 — base rotation           | PLC       |
+| joint_2 | A2 — shoulder                | PLC       |
+| joint_3 | A3 — elbow                   | PLC       |
+| joint_4 | A4 — tool roll (was joint_6) | PLC       |
+| joint_5 | A5 — hidden tool axis        | Python    |
 
 ### 4.2 Home Offset Calibration
 
@@ -108,12 +108,12 @@ After (right): Main_Robot_L_URDF_tool.urdf — constraints relaxed, tool aligns 
 
 ## 5. Action Graph Configuration
 
-| Node | Purpose |
-|---|---|
-| On Playback Tick | Fires every simulation step |
-| Isaac Read Simulation Time | Provides timestamp |
-| ROS2 Publish Joint State | Publishes /joint_states |
-| ROS2 Publish Transform Tree | Publishes /tf |
+| Node                        | Purpose                     |
+|-----------------------------|-----------------------------|
+| On Playback Tick            | Fires every simulation step |
+| Isaac Read Simulation Time  | Provides timestamp          |
+| ROS2 Publish Joint State    | Publishes /joint_states     |
+| ROS2 Publish Transform Tree | Publishes /tf               |
 
 Connections:
 OnPlaybackTick (exec) -> ROS2 Publish Joint State
@@ -133,20 +133,20 @@ Screenshot: https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/ma
 
 At mechanical zero (all joints = 0 rad):
 
-| Parameter | Value (mm) | Description |
-|---|---|---|
-| L1 | 540 | Base -> A2 |
-| L2 | 320 | Horizontal offset A2 |
-| L3 | 870 | A2 -> A3 |
-| L4 | 1020 | A3 -> flange |
-| LF | TBD | Flange length |
+| Parameter | Value (mm) | Description          |
+|-----------|------------|----------------------|
+| L1        | 540        | Base -> A2           |
+| L2        | 320        | Horizontal offset A2 |
+| L3        | 870        | A2 -> A3             |
+| L4        | 1020       | A3 -> flange         |
+| LF        | TBD        | Flange length        |
 
 | Parameter | Datasheet | Measured | Match |
-|---|---|---|---|
-| L1 | 540 | 540 | OK |
-| L2 | 320 | 320 | OK |
-| L3 | 870 | 870 | OK |
-| L4 | 1020 | 1020 | OK |
+|-----------|-----------|----------|-------|
+| L1        | 540       | 540      | OK    |
+| L2        | 320       | 320      | OK    |
+| L3        | 870       | 870      | OK    |
+| L4        | 1020      | 1020     | OK    |
 
 ## 7. Verifying the Setup
 
@@ -171,29 +171,29 @@ Note: link_5/link_6 coincide — wrist axes are collinear.
 
 ## 8. TIA Portal Kinematics Mapping
 
-| TIA Portal field | Value | Source |
-|---|---|---|
-| L1 | 540 mm | Base -> A2 |
-| L2 | 320 mm | Offset A2 |
-| L3 | 870 mm | A2 -> A3 |
-| L4 | 1020 mm | A3 -> flange |
-| LF | TBD | link_6 -> tool0 |
-| Compensation factor | 0.0 | None |
+| TIA Portal field    | Value   | Source          |
+|---------------------|---------|-----------------|
+| L1                  | 540 mm  | Base -> A2      |
+| L2                  | 320 mm  | Offset A2       |
+| L3                  | 870 mm  | A2 -> A3        |
+| L4                  | 1020 mm | A3 -> flange    |
+| LF                  | TBD     | link_6 -> tool0 |
+| Compensation factor | 0.0     | None            |
 
 ## 9. Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| /tf all zeros | Missing ROS2 Publish Transform Tree / empty targetPrims | Set targetPrims = /World/Main_Robot_L_Yaskawa_GP110 |
-| /tf frozen | TF not wired to OnPlaybackTick | Connect exec ports |
-| joint_4 missing | joint_6 not renamed | Rename joint_6 -> joint_4 |
-| Duplicate frames | Two URDF roots | Delete base_joint |
-| Robot falls | base_link not fixed | Add fixed joint to world |
-| Not articulation | Missing Articulation Root | Add Physics -> Articulation Root |
-| Jitter | Damping too low | Damping=1000, Stiffness=10000 |
-| tf2_echo "frame does not exist" | Early lookup | Wait ~2 s |
-| Tool cannot point fully down | joint_5 URDF limits too tight | Use Main_Robot_L_URDF_tool.urdf (joint_5 constraints relaxed) |
-| Residual XY/Z offset in TCP | joint_5 not driven programmatically (A5 ≠ 0) | Lock A5 = 0 or apply A5 = −(A1+A4) — see Appendix E |
+| Symptom                           | Cause                                                   | Fix                                                 |
+|-----------------------------------|---------------------------------------------------------|-----------------------------------------------------|
+| /tf all zeros                     | Missing ROS2 Publish Transform Tree / empty targetPrims | Set targetPrims = /World/Main_Robot_L_Yaskawa_GP110 |
+| /tf frozen                        | TF not wired to OnPlaybackTick                          | Connect exec ports                                  |
+| joint_4 missing                   | joint_6 not renamed                                     | Rename joint_6 -> joint_4                           |
+| Duplicate frames                  | Two URDF roots                                          | Delete base_joint                                   |
+| Robot falls                       | base_link not fixed                                     | Add fixed joint to world                            |
+| Not articulation                  | Missing Articulation Root                               | Add Physics -> Articulation Root                    |
+| Jitter                            | Damping too low                                         | Damping=1000, Stiffness=10000                       |
+| tf2_echo "frame does not exist"   | Early lookup                                            | Wait ~2 s                                           |
+| Tool cannot point fully down      | joint_5 URDF limits too tight                           | Use Main_Robot_L_URDF_tool.urdf (joint_5 constraints relaxed) |
+| Residual XY/Z offset in TCP       | joint_5 not driven programmatically (A5 ≠ 0)            | Lock A5 = 0 or apply A5 = −(A1+A4) — see Appendix E |
 
 ## 10. Notes & Best Practices
 
@@ -261,22 +261,22 @@ Main_Robot_L_Yaskawa_GP110   (root, fixed to world)
 
 ## Appendix B — ROS 2 Topics
 
-| Topic | Type | Direction | Purpose |
-|---|---|---|---|
-| /joint_states | sensor_msgs/JointState | Isaac -> ROS 2 | Joint angles |
-| /tf | tf2_msgs/TFMessage | Isaac -> ROS 2 | Dynamic transforms |
-| /tf_static | tf2_msgs/TFMessage | Isaac -> ROS 2 | Static transforms |
-| /clock | rosgraph_msgs/Clock | Isaac -> ROS 2 | Simulation time |
+| Topic         | Type                   | Direction      | Purpose            |
+|---------------|------------------------|----------------|--------------------|
+| /joint_states | sensor_msgs/JointState | Isaac -> ROS 2 | Joint angles       |
+| /tf           | tf2_msgs/TFMessage     | Isaac -> ROS 2 | Dynamic transforms |
+| /tf_static    | tf2_msgs/TFMessage     | Isaac -> ROS 2 | Static transforms  |
+| /clock        | rosgraph_msgs/Clock    | Isaac -> ROS 2 | Simulation time    |
 
 ## Appendix C — Default Joint Names
 
-| Index | Name | Role |
-|---|---|---|
-| 1 | joint_1 | Base rotation (A1) |
-| 2 | joint_2 | Shoulder (A2) |
-| 3 | joint_3 | Elbow (A3) |
-| 4 | joint_4 | Tool roll (A4, was joint_6) |
-| 5 | joint_5 | Hidden tool axis (Python-driven, constraints relaxed in Main_Robot_L_URDF_tool.urdf) |
+| Index | Name    | Role                                                                                 |
+|-------|---------|--------------------------------------------------------------------------------------|
+| 1     | joint_1 | Base rotation (A1)                                                                   |
+| 2     | joint_2 | Shoulder (A2)                                                                        |
+| 3     | joint_3 | Elbow (A3)                                                                           |
+| 4     | joint_4 | Tool roll (A4, was joint_6)                                                          |
+| 5     | joint_5 | Hidden tool axis (Python-driven, constraints relaxed in Main_Robot_L_URDF_tool.urdf) |
 
 ## Appendix D — Zero-Pose Validation Results
 
@@ -344,19 +344,19 @@ tool       3106.325     -0.000   -122.340      0.312 | 3100.0  0.0   330.0  0.0 
 
 ### D.2 Position (Cartesian) — Successfully Zeroed
 
-| Axis | PLC | Isaac | Δ (mm) | Status |
-|---|---|---|---|---|
-| X | 3100.000 mm | 3100.003 mm | -0.003 | Effectively zero (sub-micron) |
-| Y | 0.000 mm | -0.000 mm | 0.000 | Absolute match |
-| Z | 330.000 mm | 329.896 mm | 0.104 | Excellent (physics noise only) |
+| Axis | PLC         | Isaac       | Δ (mm) | Status                         |
+|------|-------------|-------------|--------|--------------------------------|
+| X    | 3100.000 mm | 3100.003 mm | -0.003 | Effectively zero (sub-micron)  |
+| Y    | 0.000 mm    | -0.000 mm   | 0.000  | Absolute match                 |
+| Z    | 330.000 mm  | 329.896 mm  | 0.104  | Excellent (physics noise only) |
 
 Result: The Cartesian position of the TCP in the zero pose is now essentially identical between the PLC and the simulation. X and Y are effectively exact, and Z differs by only ~0.1 mm, which is well within simulation physics noise and is considered a fully successful match.
 
 ### D.3 Remaining Issue — Cartesian Angle dA = -85.735°
 
-| Axis | PLC | Isaac | Δ (deg) | Status |
-|---|---|---|---|---|
-| A | 0.000° | 85.735° | -85.735 | Offset still required |
+| Axis | PLC    | Isaac   | Δ (deg) | Status                |
+|------|--------|---------|---------|-----------------------|
+| A    | 0.000° | 85.735° | -85.735 | Offset still required |
 
 The PLC reports the tool angle as 0.000° while the simulation reports 85.735°. This means the current A-axis offset that was applied (+85.423°) still needs a small correction to fully compensate the remaining ~85°.
 
@@ -364,10 +364,13 @@ Decision: All software/offset corrections (including the A-axis offset fix) are 
 
 ### D.4 Known Cosmetic Issues (Non-Blocking)
 
-| Issue | Cause | Note |
-|---|---|---|
-| base_link lookup fails | base_link not present as a TF source frame in Isaac | Cosmetic; all other frames resolve correctly. link_1 acts as the effective root. |
-| tool A = 0.312° | Residual from the same A-axis offset | Will disappear once the A offset is corrected in v0.3. |
+| Issue                                                  | Cause                                               | Note                              |
+|--------------------------------------------------------|-----------------------------------------------------|-----------------------------------|
+| base_link lookup fails                                 | base_link not present as a TF source frame in Isaac | Cosmetic; all other frames resolve|
+|                                                        |                                                     | correctly. link_1 acts as the     |
+|                                                        |                                                     | effective root.                   |
+| tool A = 0.312°                                        | Residual from the same A-axis offset                | Will disappear once the A offset  |
+|                                                        |                                                     | is corrected in v0.3.             |
 
 ### D.5 Summary
 
@@ -394,48 +397,48 @@ We followed a variable isolation approach, step by step:
 
 | Axis | PLC mech | ROS mech | d(PLC−ROS) |
 |------|----------|----------|------------|
-| A1 | 0.000 | 0.006 | −0.006 |
-| A2 | 0.000 | −0.126 | +0.126 |
-| A3 | 0.000 | −0.029 | +0.029 |
-| A4 | 0.000 | 0.000 | 0.000 |
+| A1   | 0.000    | 0.006    | −0.006     |
+| A2   | 0.000    | −0.126   | +0.126     |
+| A3   | 0.000    | −0.029   | +0.029     |
+| A4   | 0.000    | 0.000    | 0.000      |
 
 Conclusion: The four main joints match closely. The problem is not in A1–A4.
 
 #### Step 2: TCP (Cartesian) Comparison
 
-| Axis | PLC | Isaac | Δ |
-|------|-----|-------|---|
-| X (mm) | 3100.000 | 3099.749 | +0.251 |
-| Y (mm) | 0.000 | 0.184 | −0.184 |
-| Z (mm) | 440.916 | 434.119 | +6.797 |
-| A (deg) | 0.000 | 0.003 | −0.003 |
+| Axis    | PLC      | Isaac    | Δ      |
+|---------|----------|----------|--------|
+| X (mm)  | 3100.000 | 3099.749 | +0.251 |
+| Y (mm)  | 0.000    | 0.184    | −0.184 |
+| Z (mm)  | 440.916  | 434.119  | +6.797 |
+| A (deg) | 0.000    | 0.003    | −0.003 |
 
 Conclusion: Z shows a constant ~6.8 mm offset. The issue is in tool geometry or a hidden axis.
 
 #### Step 3: Frame Analysis
 
-| Frame | Isaac X | Isaac Z | Note |
-|-------|---------|---------|------|
-| link_4 | 3100.000 | 529.425 | Matches PLC |
-| tool | 3108.209 | 440.720 | X offset = +8.2 mm |
+| Frame  | Isaac X  | Isaac Z | Note               |
+|--------|----------|---------|--------------------|
+| link_4 | 3100.000 | 529.425 | Matches PLC        |
+| tool   | 3108.209 | 440.720 | X offset = +8.2 mm |
 
 Discovery: link_4 is correct, but tool has an unexplained XY offset.
 
 #### Step 4: A4 Test (to isolate the frame)
 
-| A4 | tool X | tool Y | Offset |
-|-----|--------|--------|--------|
-| 0° | 3108.209 | 0.015 | (+8.209, 0) |
-| 90° | 3108.208 | 0.015 | (+8.208, 0) |
+| A4  | tool X   | tool Y | Offset      |
+|-----|----------|--------|-------------|
+| 0°  | 3108.209 | 0.015  | (+8.209, 0) |
+| 90° | 3108.208 | 0.015  | (+8.208, 0) |
 
 Conclusion: The offset does not rotate with A4 → it is not in the link_4 frame.
 
 #### Step 5: A1 Test (to identify the frame)
 
-| A1 | tool X | tool Y | Offset |
-|-----|--------|--------|--------|
-| 0° | 3108.208 | 0.015 | (+8.208, 0) |
-| 90° | −0.117 | 3095.317 | (0, −4.683) |
+| A1  | tool X   | tool Y   | Offset      |
+|-----|----------|----------|-------------|
+| 0°  | 3108.208 | 0.015    | (+8.208, 0) |
+| 90° | −0.117   | 3095.317 | (0, −4.683) |
 
 Conclusion: The offset rotates with A1 → in the link_1 frame. But the magnitude changed from 8.2 to 4.7 mm → the offset is dynamic!
 
@@ -506,11 +509,11 @@ A5 = -(A1 + A4)
 
 Examples:
 
-| Pose | A1 | A4 | Required A5 |
-|------|-----|-----|-------------|
-| Zero | 0° | 0° | 0° |
-| Maintenance | 35° | 55° | −90° |
-| Test | 90° | 90° | −180° |
+| Pose        | A1  | A4  | Required A5 |
+|-------------|-----|-----|-------------|
+| Zero        | 0°  | 0°  | 0°          |
+| Maintenance | 35° | 55° | −90°        |
+| Test        | 90° | 90° | −180°       |
 
 Implementation with MoveIt (v0.3):
 
@@ -526,25 +529,25 @@ def compute_A5(A1_deg, A4_deg):
 
 ### E.6 Lessons Learned
 
-| # | Lesson |
-|---|--------|
-| 1 | Hidden axes are dangerous — any joint in the URDF not driven programmatically will cause random errors. |
-| 2 | Manual jogging is not a solution — all axes must be driven programmatically. |
-| 3 | Variable isolation is effective — testing A4 then A1 revealed both the frame and the dynamic behavior. |
-| 4 | /joint_states is the primary source — reading it immediately revealed A5 = 3°. |
+| # | Lesson                                                                                                   |
+|---|----------------------------------------------------------------------------------------------------------|
+| 1 | Hidden axes are dangerous — any joint in the URDF not driven programmatically will cause random errors.  |
+| 2 | Manual jogging is not a solution — all axes must be driven programmatically.                             |
+| 3 | Variable isolation is effective — testing A4 then A1 revealed both the frame and the dynamic behavior.   |
+| 4 | /joint_states is the primary source — reading it immediately revealed A5 = 3°.                           |
 | 5 | Mathematical verification confirms diagnosis — 4.66 mm theory vs 4.68 mm measurement = conclusive proof. |
-| 6 | Functional kinematics are required — A5 = −(A1+A4) for tool-down orientation. |
-| 7 | MoveIt will be the final solution — for full automatic control of A5. |
+| 6 | Functional kinematics are required — A5 = −(A1+A4) for tool-down orientation.                            |
+| 7 | MoveIt will be the final solution — for full automatic control of A5.                                    |
 
 ### E.7 Project Impact
 
-| Before Fix | After Fix |
-|------------|-----------|
-| A5 moved manually | A5 = −(A1+A4) programmatically |
-| Dynamic XY offset | No offset |
-| TCP error ~11 mm | TCP error < 0.1 mm |
-| A_tool ≠ 0 | A_tool = 0 always |
-| Manual jogging required | No manual intervention |
+| Before Fix              | After Fix                      |
+|-------------------------|--------------------------------|
+| A5 moved manually       | A5 = −(A1+A4) programmatically |
+| Dynamic XY offset       | No offset                      |
+| TCP error ~11 mm        | TCP error < 0.1 mm             |
+| A_tool ≠ 0              | A_tool = 0 always              |
+| Manual jogging required | No manual intervention         |
 
 ### E.8 Next Phase: Real-Time Synchronization
 
