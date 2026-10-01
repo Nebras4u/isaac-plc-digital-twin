@@ -5,7 +5,7 @@
 The original bridge was implemented as a single monolithic Python file
 (`plc_ros_bridge4.py`). While functional, it was difficult to maintain,
 test, and extend. As part of the modular refactoring effort, the codebase
-was split into **five focused modules** with clear responsibilities.
+was split into **six focused modules** with clear responsibilities.
 
 The goal: **preserve the exact runtime behavior of the monolith** while
 enabling future development (v0.3 IK node, v0.4 suction gripper,
@@ -17,7 +17,7 @@ v1.1 Real-Time Sync).
 
 | Problem (Monolith)                  | Solution (Modular)                     |
 |-------------------------------------|----------------------------------------|
-| Single 200+ line file               | Five focused modules                   |
+| Single 200+ line file               | Six focused modules                    |
 | Hard to test individual components  | Each module testable in isolation      |
 | PLC / ROS / mapping logic mixed     | Separation of concerns                 |
 | Config scattered across file        | Centralized in `config.py`             |
@@ -35,6 +35,7 @@ v1.1 Real-Time Sync).
 | `plc_client.py`  | OPC UA layer: Node IDs + `opc_write()` helper                                    | ~35             |
 | `ros_bridge.py`  | ROS 2 node: `PlcRosBridge` + `run_ros()` spin thread                             | ~60             |
 | `main.py`        | Entry point: async main loop orchestrating PLC I/O + ROS publishing              | ~120            |
+| `plc_gui.py`     | Standalone tkinter GUI for manual PLC control (reads / writes OPC UA variables)  | ~330            |
 
 > **Note on naming:** The mapping module is named `joint_map.py`
 > (not `mapping.py`) to avoid a silent name collision with Python's
@@ -70,6 +71,22 @@ v1.1 Real-Time Sync).
 |              |   constants    |                                 |
 |              +----------------+                                 |
 +-----------------------------------------------------------------+
+
++-----------------------------------------------------------------+
+|                     plc_gui.py (standalone)                     |
+|                                                                 |
+|  +----------------+    +-----------------+    +--------------+  |
+|  |  tkinter UI    |    |  PlcWorker      |    |  asyncua     |  |
+|  |  (main thread) |<-->|  (bg thread +   |<-->|  Client      |  |
+|  |                |    |   asyncio loop) |    |              |  |
+|  +----------------+    +-----------------+    +--------------+  |
+|           |                     |                    |          |
+|           v                     v                    v          |
+|  +----------------+    +-----------------+    +--------------+  |
+|  |  NODES_BOOL    |    |  NODES_ARRAY_*  |    |  config.py   |  |
+|  |  NODES_FAULTS  |    |  NODES_LREAL    |    |  constants   |  |
+|  +----------------+    +-----------------+    +--------------+  |
++-----------------------------------------------------------------+
 ```
 
 ---
@@ -100,7 +117,7 @@ PRINT_PERIOD_SEC = 1.0
 ```
 
 **Benefit:** Changing a joint sign or a PLC URL requires editing one line
-in one file.
+in one file. Both `main.py` and `plc_gui.py` import from the same source.
 
 ---
 
@@ -188,6 +205,37 @@ extend (add a new read, add a new write, add a status print).
 
 ---
 
+### F.5.6 Standalone Control GUI (`plc_gui.py`)
+
+A separate tkinter application for manual PLC operation, independent of
+the ROS 2 / Isaac pipeline. It runs its own asyncio loop in a background
+thread (`PlcWorker`) and communicates with the same OPC UA server.
+
+Tabs:
+
+- **Commands (Bool)** — toggle PLC flags (CmdEnable, EnableAll, …)
+- **Faults** — read-only indicators (red = FAULT, green = OK)
+- **Speed** — write `MainRobotLeft_Vlcty`
+- **Cmd / Maint** — write `CmdAng` and `Pos4Maint` arrays
+- **Actual (read-only)** — live view of `ActAng` and `ActPos`
+
+A dedicated **RESET FAULT 801** button pulses `ResetCmd` TRUE → FALSE
+and waits for `ResetDone` (max 3 s).
+
+**Benefit:** Operators can debug the PLC without launching ROS 2 or
+Isaac Sim. The GUI uses the same Node ID naming convention
+(`node(name)` helper) and the same `opc_write_value()` pattern as
+`plc_client.py`, so any variable added to `config.py` can be exposed
+by adding its name to the appropriate `NODES_*` list.
+
+**Run:**
+```bash
+python plc_gui.py
+```
+**Deps:** `pip install asyncua`
+
+---
+
 ## F.6 Migration from Monolith
 
 | Old (Monolith)                           | New (Modular)     |
@@ -203,6 +251,7 @@ extend (add a new read, add a new write, add a status print).
 | `PlcRosBridge` class inline              | `ros_bridge.py`   |
 | `run_ros()` inline                       | `ros_bridge.py`   |
 | `main_loop()` + `if __name__` inline     | `main.py`         |
+| (none — new tool)                        | `plc_gui.py`      |
 
 ---
 
@@ -219,6 +268,8 @@ extend (add a new read, add a new write, add a status print).
 | CSV logging                | `main.py` → write `a_vals` + `act_pos` to file        |
 | IK node (v0.3)             | New module `ik_node.py`, import from `joint_map`      |
 | Suction gripper (v0.4)     | New module `gripper.py`, add ROS publisher            |
+| Manual PLC control         | `plc_gui.py` → add widget to `NODES_BOOL` / `NODES_ARRAY_*` |
+| New GUI tab                | `plc_gui.py` → add `ttk.Frame` + `nb.add()`           |
 
 ---
 
@@ -226,11 +277,12 @@ extend (add a new read, add a new write, add a status print).
 
 | Benefit            | Impact                                                                  |
 |--------------------|-------------------------------------------------------------------------|
-| Maintainability    | Each file < 130 lines, single responsibility                            |
+| Maintainability    | Each file < 330 lines, single responsibility                            |
 | Testability        | `joint_map.py` is pure; `plc_client.py` is mockable                     |
 | Readability        | Clear data flow: `config → joint_map → plc_client / ros_bridge → main`  |
 | Extensibility      | New features plug in without touching existing modules                  |
 | Reusability        | `joint_map` usable by future IK / logging nodes                         |
+| Operator tooling   | `plc_gui.py` enables manual control without ROS 2 / Isaac Sim           |
 | Team collaboration | Multiple developers can work on separate modules                        |
 
 ---
@@ -247,6 +299,7 @@ extend (add a new read, add a new write, add a status print).
 | 5 | Small focused modules are easier to debug than large monolithic files.                          |
 | 6 | **Preserve exact runtime behavior when refactoring** — move code, do not redesign it.           |
 | 7 | When a split codebase behaves differently from its monolith, check imports before logic.        |
+| 8 | Operator-facing tools (GUI) benefit from sharing the same node naming and config as the bridge. |
 
 ---
 
@@ -259,6 +312,8 @@ extend (add a new read, add a new write, add a status print).
   - `plc_client.py`
   - `ros_bridge.py`
   - `main.py`
+- Standalone tools:
+  - `plc_gui.py` (manual OPC UA control GUI)
 - Related appendices:
   - Appendix E (Hidden A5 Problem)
   - Appendix D (Zero-Pose Validation)
