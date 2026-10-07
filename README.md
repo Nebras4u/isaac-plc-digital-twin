@@ -295,7 +295,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 * **Developer:** Nebras — nebras4u@gmail.com
 * **GitHub Profile:** [Nebras4u](https://github.com)
-* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/isaac-plc-digital-twin-v2)
+* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/isaac-plc-digital-twin)
 * **YouTube Playlist:** [Videos & Demos](https://youtube.com)
 
 ***
