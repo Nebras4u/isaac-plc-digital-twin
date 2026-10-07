@@ -596,4 +596,4 @@ Apache License 2.0
 ## 19. Contact
 
 Nebras — nebras4u@gmail.com
-GitHub: https://github.com/nebras4u/isaac-plc-digital-twin-v2
+GitHub: https://github.com/nebras4u/isaac-plc-digital-twin
