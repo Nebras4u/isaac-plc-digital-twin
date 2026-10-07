@@ -71,7 +71,7 @@ Note: joint_5 remains hidden from the PLC and is still driven by Python.
 
 ### 4.3.1 Visual Comparison — Before vs After URDF Modification
 
-docs/urdf_joint5_before_after.png
+yaskawa/docs/images/urdf_joint5_before_after.png
 
 Before (left): original URDF — joint_5 limits block full tool-down.
 After (right): Main_Robot_L_URDF_tool.urdf — constraints relaxed, tool aligns with world -Z.
@@ -176,10 +176,10 @@ Note: link_5/link_6 coincide — wrist axes are collinear.
 
 ## 11. Screenshots
 
-- Live Comparison: docs/images/general_view.png
-- TIA Portal DB: docs/images/tia_portal_db.png
-- Action Graph: docs/images/Yaskawa_GP110.jpg
-- joint_5 URDF Before/After: docs/images/urdf_joint5_before_after.jpg
+- Live Comparison: yaskawa/docs/images/general_view.png
+- TIA Portal DB: yaskawa/docs/images/tia_portal_db.png
+- Action Graph: yaskawa/docs/images/Yaskawa_GP110.jpg
+- joint_5 URDF Before/After: yaskawa/docs/images/urdf_joint5_before_after.jpg
 - YouTube Video (Digital Twin #1 — Offline PLC/Sim Comparison | S7-1500T + ROS2 + Isaac Sim): https://youtu.be/nu_hQQN_-8Y
 
 ## 12. Roadmap
@@ -516,7 +516,7 @@ Next phase (Real-Time Sync):
 ### E.10 Integration Checklist
 
 - [ ] Attach the YouTube video link in the Screenshots or Current State section.
-- [ ] Add the image docs/urdf_joint5_before_after.png (mentioned but not yet present).
+- [ ] Add the image yaskawa/docs/images/urdf_joint5_before_after.png (mentioned but not yet present).
 - [ ] Update the Roadmap by adding v0.2.2.
 - [ ] Add a Real-Time Sync section to the Roadmap.
 
