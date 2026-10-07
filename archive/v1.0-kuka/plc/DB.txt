@@ -1,0 +1,616 @@
+	Static										
+	MainRobotLeft_DB_A1	PD_TEL3	0.0		False	True	True	True	False		
+	Input	PD_TEL3_IN	0.0		False	True	True	True	False		
+	ZSW1	PD_ZSW1	0.0		False	True	True	True	False		
+	NoSpeedDeviation	Bool	0.0	false	False	True	True	True	False		
+	ControlRequested	Bool	0.1	false	False	True	True	True	False		
+	SpeedComparisonValusReachedExeeded	Bool	0.2	false	False	True	True	True	False		
+	TorqueLimitNotReached	Bool	0.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	0.4	false	False	True	True	True	False		
+	NoMotorOvertemperature	Bool	0.5	false	False	True	True	True	False		
+	ActualSpeedPositive	Bool	0.6	false	False	True	True	True	False		
+	NoPowerUnitOvertemperature	Bool	0.7	false	False	True	True	True	False		
+	ReadyToSwitchOn	Bool	1.0	false	False	True	True	True	False		
+	ReadyToOperate	Bool	1.1	false	False	True	True	True	False		
+	OperationEnabled	Bool	1.2	false	False	True	True	True	False		
+	FaultPresent	Bool	1.3	false	False	True	True	True	False		
+	NoCoastStopActivated	Bool	1.4	false	False	True	True	True	False		
+	NoQuickStopActivated	Bool	1.5	false	False	True	True	True	False		
+	SwitchingOnInhibited	Bool	1.6	false	False	True	True	True	False		
+	AlarmPresent	Bool	1.7	false	False	True	True	True	False		
+	NIST_B	DWord	2.0	16#0	False	True	True	True	False		
+	ZSW2	PD_ZSW2	6.0		False	True	True	True	False		
+	TravelToFixedEndStopActive	Bool	6.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	6.1	false	False	True	True	True	False		
+	PulsesEnabled	Bool	6.2	false	False	True	True	True	False		
+	MotorDataSetChangeoverActive	Bool	6.3	false	False	True	True	True	False		
+	SlaveSignOfLifeBit0	Bool	6.4	false	False	True	True	True	False		
+	SlaveSignOfLifeBit1	Bool	6.5	false	False	True	True	True	False		
+	SlaveSignOfLifeBit2	Bool	6.6	false	False	True	True	True	False		
+	SlaveSignOfLifeBit3	Bool	6.7	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit0	Bool	7.0	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit1	Bool	7.1	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit2	Bool	7.2	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit3	Bool	7.3	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit4	Bool	7.4	false	False	True	True	True	False		
+	AlarmClassBit0	Bool	7.5	false	False	True	True	True	False		
+	AlarmClassBit1	Bool	7.6	false	False	True	True	True	False		
+	ParkingAxisActive	Bool	7.7	false	False	True	True	True	False		
+	G1_ZSW	PD_Gx_ZSW	8.0		False	True	True	True	False		
+	Probe1Deflected	Bool	8.0	false	False	True	True	True	False		
+	Probe2Deflected	Bool	8.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	8.2	false	False	True	True	True	False		
+	EncoderFaultAcknowledgeActive	Bool	8.3	false	False	True	True	True	False		
+	HomePositionExecuted	Bool	8.4	false	False	True	True	True	False		
+	AbsoluteValueCyclicallyExecuted	Bool	8.5	false	False	True	True	True	False		
+	ParkingSensorExecuted	Bool	8.6	false	False	True	True	True	False		
+	SensorError	Bool	8.7	false	False	True	True	True	False		
+	Function1Active	Bool	9.0	false	False	True	True	True	False		
+	Function2Active	Bool	9.1	false	False	True	True	True	False		
+	Function3Active	Bool	9.2	false	False	True	True	True	False		
+	Function4Active	Bool	9.3	false	False	True	True	True	False		
+	Value1Available	Bool	9.4	false	False	True	True	True	False		
+	Value2Available	Bool	9.5	false	False	True	True	True	False		
+	Value3Available	Bool	9.6	false	False	True	True	True	False		
+	Value4Available	Bool	9.7	false	False	True	True	True	False		
+	G1_XIST1	DWord	10.0	16#0	False	True	True	True	False		
+	G1_XIST2	DWord	14.0	16#0	False	True	True	True	False		
+	Output	PD_TEL3_OUT	18.0		False	True	True	True	False		
+	STW1	PD_STW1	18.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	18.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	18.1	false	False	True	True	True	False		
+	ControlByPlc	Bool	18.2	false	False	True	True	True	False		
+	SetpointInversion	Bool	18.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	18.4	false	False	True	True	True	False		
+	RaiseMotorizedPotentiometerSetpoint	Bool	18.5	false	False	True	True	True	False		
+	LowerMotorizedPotentiometerSetpoint	Bool	18.6	false	False	True	True	True	False		
+	Reserved_Bit15	Bool	18.7	false	False	True	True	True	False		
+	On	Bool	19.0	false	False	True	True	True	False		
+	NoCoastStop	Bool	19.1	false	False	True	True	True	False		
+	NoQuickStop	Bool	19.2	false	False	True	True	True	False		
+	EnableOperation	Bool	19.3	false	False	True	True	True	False		
+	EnableRampGenerator	Bool	19.4	false	False	True	True	True	False		
+	UnfreezeRampGenerator	Bool	19.5	false	False	True	True	True	False		
+	EnableSetpoint	Bool	19.6	false	False	True	True	True	False		
+	FaultAcknowledge	Bool	19.7	false	False	True	True	True	False		
+	NSOLL_B	DWord	20.0	16#0	False	True	True	True	False		
+	STW2	PD_STW2	24.0		False	True	True	True	False		
+	TravelToFixedEndstop	Bool	24.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	24.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	24.2	false	False	True	True	True	False		
+	MotorSwitchoverFinished	Bool	24.3	false	False	True	True	True	False		
+	MasterSignOfLifeBit0	Bool	24.4	false	False	True	True	True	False		
+	MasterSignOfLifeBit1	Bool	24.5	false	False	True	True	True	False		
+	MasterSignOfLifeBit2	Bool	24.6	false	False	True	True	True	False		
+	MasterSignOfLifeBit3	Bool	24.7	false	False	True	True	True	False		
+	DriveDataSetSelectionBit0	Bool	25.0	false	False	True	True	True	False		
+	DriveDataSetSelectionBit1	Bool	25.1	false	False	True	True	True	False		
+	DriveDataSetSelectionBit2	Bool	25.2	false	False	True	True	True	False		
+	DriveDataSetSelectionBit3	Bool	25.3	false	False	True	True	True	False		
+	DriveDataSetSelectionBit4	Bool	25.4	false	False	True	True	True	False		
+	Reserved_Bit05	Bool	25.5	false	False	True	True	True	False		
+	Reserved_Bit06	Bool	25.6	false	False	True	True	True	False		
+	ParkingAxisSelection	Bool	25.7	false	False	True	True	True	False		
+	G1_STW	PD_Gx_STW	26.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	26.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	26.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	26.2	false	False	True	True	True	False		
+	Reserved_Bit11	Bool	26.3	false	False	True	True	True	False		
+	Reserved_Bit12	Bool	26.4	false	False	True	True	True	False		
+	AbsoluteValueCyclically	Bool	26.5	false	False	True	True	True	False		
+	RequestParkingEncoder	Bool	26.6	false	False	True	True	True	False		
+	AcknowledgeError	Bool	26.7	false	False	True	True	True	False		
+	Function1Request	Bool	27.0	false	False	True	True	True	False		
+	Function2Request	Bool	27.1	false	False	True	True	True	False		
+	Function3Request	Bool	27.2	false	False	True	True	True	False		
+	Function4Request	Bool	27.3	false	False	True	True	True	False		
+	Command0Request	Bool	27.4	false	False	True	True	True	False		
+	Command1Request	Bool	27.5	false	False	True	True	True	False		
+	Command2Request	Bool	27.6	false	False	True	True	True	False		
+	Mode	Bool	27.7	false	False	True	True	True	False		
+	MainRobotLeft_DB_A2	PD_TEL3	28.0		False	True	True	True	False		
+	Input	PD_TEL3_IN	28.0		False	True	True	True	False		
+	ZSW1	PD_ZSW1	28.0		False	True	True	True	False		
+	NoSpeedDeviation	Bool	28.0	false	False	True	True	True	False		
+	ControlRequested	Bool	28.1	false	False	True	True	True	False		
+	SpeedComparisonValusReachedExeeded	Bool	28.2	false	False	True	True	True	False		
+	TorqueLimitNotReached	Bool	28.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	28.4	false	False	True	True	True	False		
+	NoMotorOvertemperature	Bool	28.5	false	False	True	True	True	False		
+	ActualSpeedPositive	Bool	28.6	false	False	True	True	True	False		
+	NoPowerUnitOvertemperature	Bool	28.7	false	False	True	True	True	False		
+	ReadyToSwitchOn	Bool	29.0	false	False	True	True	True	False		
+	ReadyToOperate	Bool	29.1	false	False	True	True	True	False		
+	OperationEnabled	Bool	29.2	false	False	True	True	True	False		
+	FaultPresent	Bool	29.3	false	False	True	True	True	False		
+	NoCoastStopActivated	Bool	29.4	false	False	True	True	True	False		
+	NoQuickStopActivated	Bool	29.5	false	False	True	True	True	False		
+	SwitchingOnInhibited	Bool	29.6	false	False	True	True	True	False		
+	AlarmPresent	Bool	29.7	false	False	True	True	True	False		
+	NIST_B	DWord	30.0	16#0	False	True	True	True	False		
+	ZSW2	PD_ZSW2	34.0		False	True	True	True	False		
+	TravelToFixedEndStopActive	Bool	34.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	34.1	false	False	True	True	True	False		
+	PulsesEnabled	Bool	34.2	false	False	True	True	True	False		
+	MotorDataSetChangeoverActive	Bool	34.3	false	False	True	True	True	False		
+	SlaveSignOfLifeBit0	Bool	34.4	false	False	True	True	True	False		
+	SlaveSignOfLifeBit1	Bool	34.5	false	False	True	True	True	False		
+	SlaveSignOfLifeBit2	Bool	34.6	false	False	True	True	True	False		
+	SlaveSignOfLifeBit3	Bool	34.7	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit0	Bool	35.0	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit1	Bool	35.1	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit2	Bool	35.2	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit3	Bool	35.3	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit4	Bool	35.4	false	False	True	True	True	False		
+	AlarmClassBit0	Bool	35.5	false	False	True	True	True	False		
+	AlarmClassBit1	Bool	35.6	false	False	True	True	True	False		
+	ParkingAxisActive	Bool	35.7	false	False	True	True	True	False		
+	G1_ZSW	PD_Gx_ZSW	36.0		False	True	True	True	False		
+	Probe1Deflected	Bool	36.0	false	False	True	True	True	False		
+	Probe2Deflected	Bool	36.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	36.2	false	False	True	True	True	False		
+	EncoderFaultAcknowledgeActive	Bool	36.3	false	False	True	True	True	False		
+	HomePositionExecuted	Bool	36.4	false	False	True	True	True	False		
+	AbsoluteValueCyclicallyExecuted	Bool	36.5	false	False	True	True	True	False		
+	ParkingSensorExecuted	Bool	36.6	false	False	True	True	True	False		
+	SensorError	Bool	36.7	false	False	True	True	True	False		
+	Function1Active	Bool	37.0	false	False	True	True	True	False		
+	Function2Active	Bool	37.1	false	False	True	True	True	False		
+	Function3Active	Bool	37.2	false	False	True	True	True	False		
+	Function4Active	Bool	37.3	false	False	True	True	True	False		
+	Value1Available	Bool	37.4	false	False	True	True	True	False		
+	Value2Available	Bool	37.5	false	False	True	True	True	False		
+	Value3Available	Bool	37.6	false	False	True	True	True	False		
+	Value4Available	Bool	37.7	false	False	True	True	True	False		
+	G1_XIST1	DWord	38.0	16#0	False	True	True	True	False		
+	G1_XIST2	DWord	42.0	16#0	False	True	True	True	False		
+	Output	PD_TEL3_OUT	46.0		False	True	True	True	False		
+	STW1	PD_STW1	46.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	46.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	46.1	false	False	True	True	True	False		
+	ControlByPlc	Bool	46.2	false	False	True	True	True	False		
+	SetpointInversion	Bool	46.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	46.4	false	False	True	True	True	False		
+	RaiseMotorizedPotentiometerSetpoint	Bool	46.5	false	False	True	True	True	False		
+	LowerMotorizedPotentiometerSetpoint	Bool	46.6	false	False	True	True	True	False		
+	Reserved_Bit15	Bool	46.7	false	False	True	True	True	False		
+	On	Bool	47.0	false	False	True	True	True	False		
+	NoCoastStop	Bool	47.1	false	False	True	True	True	False		
+	NoQuickStop	Bool	47.2	false	False	True	True	True	False		
+	EnableOperation	Bool	47.3	false	False	True	True	True	False		
+	EnableRampGenerator	Bool	47.4	false	False	True	True	True	False		
+	UnfreezeRampGenerator	Bool	47.5	false	False	True	True	True	False		
+	EnableSetpoint	Bool	47.6	false	False	True	True	True	False		
+	FaultAcknowledge	Bool	47.7	false	False	True	True	True	False		
+	NSOLL_B	DWord	48.0	16#0	False	True	True	True	False		
+	STW2	PD_STW2	52.0		False	True	True	True	False		
+	TravelToFixedEndstop	Bool	52.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	52.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	52.2	false	False	True	True	True	False		
+	MotorSwitchoverFinished	Bool	52.3	false	False	True	True	True	False		
+	MasterSignOfLifeBit0	Bool	52.4	false	False	True	True	True	False		
+	MasterSignOfLifeBit1	Bool	52.5	false	False	True	True	True	False		
+	MasterSignOfLifeBit2	Bool	52.6	false	False	True	True	True	False		
+	MasterSignOfLifeBit3	Bool	52.7	false	False	True	True	True	False		
+	DriveDataSetSelectionBit0	Bool	53.0	false	False	True	True	True	False		
+	DriveDataSetSelectionBit1	Bool	53.1	false	False	True	True	True	False		
+	DriveDataSetSelectionBit2	Bool	53.2	false	False	True	True	True	False		
+	DriveDataSetSelectionBit3	Bool	53.3	false	False	True	True	True	False		
+	DriveDataSetSelectionBit4	Bool	53.4	false	False	True	True	True	False		
+	Reserved_Bit05	Bool	53.5	false	False	True	True	True	False		
+	Reserved_Bit06	Bool	53.6	false	False	True	True	True	False		
+	ParkingAxisSelection	Bool	53.7	false	False	True	True	True	False		
+	G1_STW	PD_Gx_STW	54.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	54.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	54.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	54.2	false	False	True	True	True	False		
+	Reserved_Bit11	Bool	54.3	false	False	True	True	True	False		
+	Reserved_Bit12	Bool	54.4	false	False	True	True	True	False		
+	AbsoluteValueCyclically	Bool	54.5	false	False	True	True	True	False		
+	RequestParkingEncoder	Bool	54.6	false	False	True	True	True	False		
+	AcknowledgeError	Bool	54.7	false	False	True	True	True	False		
+	Function1Request	Bool	55.0	false	False	True	True	True	False		
+	Function2Request	Bool	55.1	false	False	True	True	True	False		
+	Function3Request	Bool	55.2	false	False	True	True	True	False		
+	Function4Request	Bool	55.3	false	False	True	True	True	False		
+	Command0Request	Bool	55.4	false	False	True	True	True	False		
+	Command1Request	Bool	55.5	false	False	True	True	True	False		
+	Command2Request	Bool	55.6	false	False	True	True	True	False		
+	Mode	Bool	55.7	false	False	True	True	True	False		
+	MainRobotLeft_DB_A3	PD_TEL3	56.0		False	True	True	True	False		
+	Input	PD_TEL3_IN	56.0		False	True	True	True	False		
+	ZSW1	PD_ZSW1	56.0		False	True	True	True	False		
+	NoSpeedDeviation	Bool	56.0	false	False	True	True	True	False		
+	ControlRequested	Bool	56.1	false	False	True	True	True	False		
+	SpeedComparisonValusReachedExeeded	Bool	56.2	false	False	True	True	True	False		
+	TorqueLimitNotReached	Bool	56.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	56.4	false	False	True	True	True	False		
+	NoMotorOvertemperature	Bool	56.5	false	False	True	True	True	False		
+	ActualSpeedPositive	Bool	56.6	false	False	True	True	True	False		
+	NoPowerUnitOvertemperature	Bool	56.7	false	False	True	True	True	False		
+	ReadyToSwitchOn	Bool	57.0	false	False	True	True	True	False		
+	ReadyToOperate	Bool	57.1	false	False	True	True	True	False		
+	OperationEnabled	Bool	57.2	false	False	True	True	True	False		
+	FaultPresent	Bool	57.3	false	False	True	True	True	False		
+	NoCoastStopActivated	Bool	57.4	false	False	True	True	True	False		
+	NoQuickStopActivated	Bool	57.5	false	False	True	True	True	False		
+	SwitchingOnInhibited	Bool	57.6	false	False	True	True	True	False		
+	AlarmPresent	Bool	57.7	false	False	True	True	True	False		
+	NIST_B	DWord	58.0	16#0	False	True	True	True	False		
+	ZSW2	PD_ZSW2	62.0		False	True	True	True	False		
+	TravelToFixedEndStopActive	Bool	62.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	62.1	false	False	True	True	True	False		
+	PulsesEnabled	Bool	62.2	false	False	True	True	True	False		
+	MotorDataSetChangeoverActive	Bool	62.3	false	False	True	True	True	False		
+	SlaveSignOfLifeBit0	Bool	62.4	false	False	True	True	True	False		
+	SlaveSignOfLifeBit1	Bool	62.5	false	False	True	True	True	False		
+	SlaveSignOfLifeBit2	Bool	62.6	false	False	True	True	True	False		
+	SlaveSignOfLifeBit3	Bool	62.7	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit0	Bool	63.0	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit1	Bool	63.1	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit2	Bool	63.2	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit3	Bool	63.3	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit4	Bool	63.4	false	False	True	True	True	False		
+	AlarmClassBit0	Bool	63.5	false	False	True	True	True	False		
+	AlarmClassBit1	Bool	63.6	false	False	True	True	True	False		
+	ParkingAxisActive	Bool	63.7	false	False	True	True	True	False		
+	G1_ZSW	PD_Gx_ZSW	64.0		False	True	True	True	False		
+	Probe1Deflected	Bool	64.0	false	False	True	True	True	False		
+	Probe2Deflected	Bool	64.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	64.2	false	False	True	True	True	False		
+	EncoderFaultAcknowledgeActive	Bool	64.3	false	False	True	True	True	False		
+	HomePositionExecuted	Bool	64.4	false	False	True	True	True	False		
+	AbsoluteValueCyclicallyExecuted	Bool	64.5	false	False	True	True	True	False		
+	ParkingSensorExecuted	Bool	64.6	false	False	True	True	True	False		
+	SensorError	Bool	64.7	false	False	True	True	True	False		
+	Function1Active	Bool	65.0	false	False	True	True	True	False		
+	Function2Active	Bool	65.1	false	False	True	True	True	False		
+	Function3Active	Bool	65.2	false	False	True	True	True	False		
+	Function4Active	Bool	65.3	false	False	True	True	True	False		
+	Value1Available	Bool	65.4	false	False	True	True	True	False		
+	Value2Available	Bool	65.5	false	False	True	True	True	False		
+	Value3Available	Bool	65.6	false	False	True	True	True	False		
+	Value4Available	Bool	65.7	false	False	True	True	True	False		
+	G1_XIST1	DWord	66.0	16#0	False	True	True	True	False		
+	G1_XIST2	DWord	70.0	16#0	False	True	True	True	False		
+	Output	PD_TEL3_OUT	74.0		False	True	True	True	False		
+	STW1	PD_STW1	74.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	74.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	74.1	false	False	True	True	True	False		
+	ControlByPlc	Bool	74.2	false	False	True	True	True	False		
+	SetpointInversion	Bool	74.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	74.4	false	False	True	True	True	False		
+	RaiseMotorizedPotentiometerSetpoint	Bool	74.5	false	False	True	True	True	False		
+	LowerMotorizedPotentiometerSetpoint	Bool	74.6	false	False	True	True	True	False		
+	Reserved_Bit15	Bool	74.7	false	False	True	True	True	False		
+	On	Bool	75.0	false	False	True	True	True	False		
+	NoCoastStop	Bool	75.1	false	False	True	True	True	False		
+	NoQuickStop	Bool	75.2	false	False	True	True	True	False		
+	EnableOperation	Bool	75.3	false	False	True	True	True	False		
+	EnableRampGenerator	Bool	75.4	false	False	True	True	True	False		
+	UnfreezeRampGenerator	Bool	75.5	false	False	True	True	True	False		
+	EnableSetpoint	Bool	75.6	false	False	True	True	True	False		
+	FaultAcknowledge	Bool	75.7	false	False	True	True	True	False		
+	NSOLL_B	DWord	76.0	16#0	False	True	True	True	False		
+	STW2	PD_STW2	80.0		False	True	True	True	False		
+	TravelToFixedEndstop	Bool	80.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	80.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	80.2	false	False	True	True	True	False		
+	MotorSwitchoverFinished	Bool	80.3	false	False	True	True	True	False		
+	MasterSignOfLifeBit0	Bool	80.4	false	False	True	True	True	False		
+	MasterSignOfLifeBit1	Bool	80.5	false	False	True	True	True	False		
+	MasterSignOfLifeBit2	Bool	80.6	false	False	True	True	True	False		
+	MasterSignOfLifeBit3	Bool	80.7	false	False	True	True	True	False		
+	DriveDataSetSelectionBit0	Bool	81.0	false	False	True	True	True	False		
+	DriveDataSetSelectionBit1	Bool	81.1	false	False	True	True	True	False		
+	DriveDataSetSelectionBit2	Bool	81.2	false	False	True	True	True	False		
+	DriveDataSetSelectionBit3	Bool	81.3	false	False	True	True	True	False		
+	DriveDataSetSelectionBit4	Bool	81.4	false	False	True	True	True	False		
+	Reserved_Bit05	Bool	81.5	false	False	True	True	True	False		
+	Reserved_Bit06	Bool	81.6	false	False	True	True	True	False		
+	ParkingAxisSelection	Bool	81.7	false	False	True	True	True	False		
+	G1_STW	PD_Gx_STW	82.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	82.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	82.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	82.2	false	False	True	True	True	False		
+	Reserved_Bit11	Bool	82.3	false	False	True	True	True	False		
+	Reserved_Bit12	Bool	82.4	false	False	True	True	True	False		
+	AbsoluteValueCyclically	Bool	82.5	false	False	True	True	True	False		
+	RequestParkingEncoder	Bool	82.6	false	False	True	True	True	False		
+	AcknowledgeError	Bool	82.7	false	False	True	True	True	False		
+	Function1Request	Bool	83.0	false	False	True	True	True	False		
+	Function2Request	Bool	83.1	false	False	True	True	True	False		
+	Function3Request	Bool	83.2	false	False	True	True	True	False		
+	Function4Request	Bool	83.3	false	False	True	True	True	False		
+	Command0Request	Bool	83.4	false	False	True	True	True	False		
+	Command1Request	Bool	83.5	false	False	True	True	True	False		
+	Command2Request	Bool	83.6	false	False	True	True	True	False		
+	Mode	Bool	83.7	false	False	True	True	True	False		
+	MainRobotLeft_DB_A4	PD_TEL3	84.0		False	True	True	True	False		
+	Input	PD_TEL3_IN	84.0		False	True	True	True	False		
+	ZSW1	PD_ZSW1	84.0		False	True	True	True	False		
+	NoSpeedDeviation	Bool	84.0	false	False	True	True	True	False		
+	ControlRequested	Bool	84.1	false	False	True	True	True	False		
+	SpeedComparisonValusReachedExeeded	Bool	84.2	false	False	True	True	True	False		
+	TorqueLimitNotReached	Bool	84.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	84.4	false	False	True	True	True	False		
+	NoMotorOvertemperature	Bool	84.5	false	False	True	True	True	False		
+	ActualSpeedPositive	Bool	84.6	false	False	True	True	True	False		
+	NoPowerUnitOvertemperature	Bool	84.7	false	False	True	True	True	False		
+	ReadyToSwitchOn	Bool	85.0	false	False	True	True	True	False		
+	ReadyToOperate	Bool	85.1	false	False	True	True	True	False		
+	OperationEnabled	Bool	85.2	false	False	True	True	True	False		
+	FaultPresent	Bool	85.3	false	False	True	True	True	False		
+	NoCoastStopActivated	Bool	85.4	false	False	True	True	True	False		
+	NoQuickStopActivated	Bool	85.5	false	False	True	True	True	False		
+	SwitchingOnInhibited	Bool	85.6	false	False	True	True	True	False		
+	AlarmPresent	Bool	85.7	false	False	True	True	True	False		
+	NIST_B	DWord	86.0	16#0	False	True	True	True	False		
+	ZSW2	PD_ZSW2	90.0		False	True	True	True	False		
+	TravelToFixedEndStopActive	Bool	90.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	90.1	false	False	True	True	True	False		
+	PulsesEnabled	Bool	90.2	false	False	True	True	True	False		
+	MotorDataSetChangeoverActive	Bool	90.3	false	False	True	True	True	False		
+	SlaveSignOfLifeBit0	Bool	90.4	false	False	True	True	True	False		
+	SlaveSignOfLifeBit1	Bool	90.5	false	False	True	True	True	False		
+	SlaveSignOfLifeBit2	Bool	90.6	false	False	True	True	True	False		
+	SlaveSignOfLifeBit3	Bool	90.7	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit0	Bool	91.0	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit1	Bool	91.1	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit2	Bool	91.2	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit3	Bool	91.3	false	False	True	True	True	False		
+	DriveDataSetEffectiveBit4	Bool	91.4	false	False	True	True	True	False		
+	AlarmClassBit0	Bool	91.5	false	False	True	True	True	False		
+	AlarmClassBit1	Bool	91.6	false	False	True	True	True	False		
+	ParkingAxisActive	Bool	91.7	false	False	True	True	True	False		
+	G1_ZSW	PD_Gx_ZSW	92.0		False	True	True	True	False		
+	Probe1Deflected	Bool	92.0	false	False	True	True	True	False		
+	Probe2Deflected	Bool	92.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	92.2	false	False	True	True	True	False		
+	EncoderFaultAcknowledgeActive	Bool	92.3	false	False	True	True	True	False		
+	HomePositionExecuted	Bool	92.4	false	False	True	True	True	False		
+	AbsoluteValueCyclicallyExecuted	Bool	92.5	false	False	True	True	True	False		
+	ParkingSensorExecuted	Bool	92.6	false	False	True	True	True	False		
+	SensorError	Bool	92.7	false	False	True	True	True	False		
+	Function1Active	Bool	93.0	false	False	True	True	True	False		
+	Function2Active	Bool	93.1	false	False	True	True	True	False		
+	Function3Active	Bool	93.2	false	False	True	True	True	False		
+	Function4Active	Bool	93.3	false	False	True	True	True	False		
+	Value1Available	Bool	93.4	false	False	True	True	True	False		
+	Value2Available	Bool	93.5	false	False	True	True	True	False		
+	Value3Available	Bool	93.6	false	False	True	True	True	False		
+	Value4Available	Bool	93.7	false	False	True	True	True	False		
+	G1_XIST1	DWord	94.0	16#0	False	True	True	True	False		
+	G1_XIST2	DWord	98.0	16#0	False	True	True	True	False		
+	Output	PD_TEL3_OUT	102.0		False	True	True	True	False		
+	STW1	PD_STW1	102.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	102.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	102.1	false	False	True	True	True	False		
+	ControlByPlc	Bool	102.2	false	False	True	True	True	False		
+	SetpointInversion	Bool	102.3	false	False	True	True	True	False		
+	OpenHoldingBrake	Bool	102.4	false	False	True	True	True	False		
+	RaiseMotorizedPotentiometerSetpoint	Bool	102.5	false	False	True	True	True	False		
+	LowerMotorizedPotentiometerSetpoint	Bool	102.6	false	False	True	True	True	False		
+	Reserved_Bit15	Bool	102.7	false	False	True	True	True	False		
+	On	Bool	103.0	false	False	True	True	True	False		
+	NoCoastStop	Bool	103.1	false	False	True	True	True	False		
+	NoQuickStop	Bool	103.2	false	False	True	True	True	False		
+	EnableOperation	Bool	103.3	false	False	True	True	True	False		
+	EnableRampGenerator	Bool	103.4	false	False	True	True	True	False		
+	UnfreezeRampGenerator	Bool	103.5	false	False	True	True	True	False		
+	EnableSetpoint	Bool	103.6	false	False	True	True	True	False		
+	FaultAcknowledge	Bool	103.7	false	False	True	True	True	False		
+	NSOLL_B	DWord	104.0	16#0	False	True	True	True	False		
+	STW2	PD_STW2	108.0		False	True	True	True	False		
+	TravelToFixedEndstop	Bool	108.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	108.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	108.2	false	False	True	True	True	False		
+	MotorSwitchoverFinished	Bool	108.3	false	False	True	True	True	False		
+	MasterSignOfLifeBit0	Bool	108.4	false	False	True	True	True	False		
+	MasterSignOfLifeBit1	Bool	108.5	false	False	True	True	True	False		
+	MasterSignOfLifeBit2	Bool	108.6	false	False	True	True	True	False		
+	MasterSignOfLifeBit3	Bool	108.7	false	False	True	True	True	False		
+	DriveDataSetSelectionBit0	Bool	109.0	false	False	True	True	True	False		
+	DriveDataSetSelectionBit1	Bool	109.1	false	False	True	True	True	False		
+	DriveDataSetSelectionBit2	Bool	109.2	false	False	True	True	True	False		
+	DriveDataSetSelectionBit3	Bool	109.3	false	False	True	True	True	False		
+	DriveDataSetSelectionBit4	Bool	109.4	false	False	True	True	True	False		
+	Reserved_Bit05	Bool	109.5	false	False	True	True	True	False		
+	Reserved_Bit06	Bool	109.6	false	False	True	True	True	False		
+	ParkingAxisSelection	Bool	109.7	false	False	True	True	True	False		
+	G1_STW	PD_Gx_STW	110.0		False	True	True	True	False		
+	Reserved_Bit08	Bool	110.0	false	False	True	True	True	False		
+	Reserved_Bit09	Bool	110.1	false	False	True	True	True	False		
+	Reserved_Bit10	Bool	110.2	false	False	True	True	True	False		
+	Reserved_Bit11	Bool	110.3	false	False	True	True	True	False		
+	Reserved_Bit12	Bool	110.4	false	False	True	True	True	False		
+	AbsoluteValueCyclically	Bool	110.5	false	False	True	True	True	False		
+	RequestParkingEncoder	Bool	110.6	false	False	True	True	True	False		
+	AcknowledgeError	Bool	110.7	false	False	True	True	True	False		
+	Function1Request	Bool	111.0	false	False	True	True	True	False		
+	Function2Request	Bool	111.1	false	False	True	True	True	False		
+	Function3Request	Bool	111.2	false	False	True	True	True	False		
+	Function4Request	Bool	111.3	false	False	True	True	True	False		
+	Command0Request	Bool	111.4	false	False	True	True	True	False		
+	Command1Request	Bool	111.5	false	False	True	True	True	False		
+	Command2Request	Bool	111.6	false	False	True	True	True	False		
+	Mode	Bool	111.7	false	False	True	True	True	False		
+	MainRobotLeft_Vlcty	LReal	112.0	500.0	False	True	True	True	False		
+	MainRobotLeft_ActAng	Array[1..4] of LReal	120.0		False	True	True	True	False		
+	MainRobotLeft_ActAng[1]	LReal	120.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActAng[2]	LReal	128.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActAng[3]	LReal	136.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActAng[4]	LReal	144.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActPos	Array[1..4] of LReal	152.0		False	True	True	True	False		
+	MainRobotLeft_ActPos[1]	LReal	152.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActPos[2]	LReal	160.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActPos[3]	LReal	168.0	0.0	False	True	True	True	False		
+	MainRobotLeft_ActPos[4]	LReal	176.0	0.0	False	True	True	True	False		
+	MainRobotLeft_CmdAng	Array[1..4] of LReal	184.0		False	True	True	True	False		
+	MainRobotLeft_CmdAng[1]	LReal	184.0	30.0	False	True	True	True	False		
+	MainRobotLeft_CmdAng[2]	LReal	192.0	-30.0	False	True	True	True	False		
+	MainRobotLeft_CmdAng[3]	LReal	200.0	60.0	False	True	True	True	False		
+	MainRobotLeft_CmdAng[4]	LReal	208.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Pos4Maint	Array[1..4] of LReal	216.0		False	True	True	True	False		
+	MainRobotLeft_Pos4Maint[1]	LReal	216.0	1841.363	False	True	True	True	False		
+	MainRobotLeft_Pos4Maint[2]	LReal	224.0	1545.088	False	True	True	True	False		
+	MainRobotLeft_Pos4Maint[3]	LReal	232.0	1853.159	False	True	True	True	False		
+	MainRobotLeft_Pos4Maint[4]	LReal	240.0	40.0	False	True	True	True	False		
+	MainRobotLeft_CmdAct	Bool	248.0	false	False	True	True	True	False		
+	MainRobotLeft_Go2Pos4Maint	Bool	248.1	false	False	True	True	True	False		
+	MainRobotLeft_Group_Fault	Bool	248.2	false	False	True	True	True	False		
+	MainRobotLeft_Axis1_Fault	Bool	248.3	false	False	True	True	True	False		
+	MainRobotLeft_Axis2_Fault	Bool	248.4	false	False	True	True	True	False		
+	MainRobotLeft_Axis3_Fault	Bool	248.5	false	False	True	True	True	False		
+	MainRobotLeft_Axis4_Fault	Bool	248.6	false	False	True	True	True	False		
+	MainRobotLeft_HomePos	Array[1..4] of LReal	250.0		False	True	True	True	False		
+	MainRobotLeft_HomePos[1]	LReal	250.0	1750.0	False	True	True	True	False		
+	MainRobotLeft_HomePos[2]	LReal	258.0	0.0	False	True	True	True	False		
+	MainRobotLeft_HomePos[3]	LReal	266.0	1790.916	False	True	True	True	False		
+	MainRobotLeft_HomePos[4]	LReal	274.0	0.0	False	True	True	True	False		
+	MainRobotLeft_UpTheLinePos	Array[1..4] of LReal	282.0		False	True	True	True	False		
+	MainRobotLeft_UpTheLinePos[1]	LReal	282.0	700.0	False	True	True	True	False		
+	MainRobotLeft_UpTheLinePos[2]	LReal	290.0	0.0	False	True	True	True	False		
+	MainRobotLeft_UpTheLinePos[3]	LReal	298.0	434.0	False	True	True	True	False		
+	MainRobotLeft_UpTheLinePos[4]	LReal	306.0	0.0	False	True	True	True	False		
+	MainRobotLeft_PickUp1	Array[1..4] of LReal	314.0		False	True	True	True	False		
+	MainRobotLeft_PickUp1[1]	LReal	314.0	2563.375	False	True	True	True	False		
+	MainRobotLeft_PickUp1[2]	LReal	322.0	0.0	False	True	True	True	False		
+	MainRobotLeft_PickUp1[3]	LReal	330.0	813.789	False	True	True	True	False		
+	MainRobotLeft_PickUp1[4]	LReal	338.0	0.0	False	True	True	True	False		
+	MainRobotLeft_PickUp2	Array[1..4] of LReal	346.0		False	True	True	True	False		
+	MainRobotLeft_PickUp2[1]	LReal	346.0	2563.375	False	True	True	True	False		
+	MainRobotLeft_PickUp2[2]	LReal	354.0	0.0	False	True	True	True	False		
+	MainRobotLeft_PickUp2[3]	LReal	362.0	429.821	False	True	True	True	False		
+	MainRobotLeft_PickUp2[4]	LReal	370.0	0.0	False	True	True	True	False		
+	MainRobotLeft_PickUp3	Array[1..4] of LReal	378.0		False	True	True	True	False		
+	MainRobotLeft_PickUp3[1]	LReal	378.0	2563.375	False	True	True	True	False		
+	MainRobotLeft_PickUp3[2]	LReal	386.0	429.459	False	True	True	True	False		
+	MainRobotLeft_PickUp3[3]	LReal	394.0	429.82	False	True	True	True	False		
+	MainRobotLeft_PickUp3[4]	LReal	402.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points1	Array[1..4] of LReal	410.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points1[1]	LReal	410.0	2409.93	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points1[2]	LReal	418.0	403.751	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points1[3]	LReal	426.0	1317.665	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points1[4]	LReal	434.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points2	Array[1..4] of LReal	442.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points2[1]	LReal	442.0	1272.705	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points2[2]	LReal	450.0	1671.317	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points2[3]	LReal	458.0	1425.88	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points2[4]	LReal	466.0	43.199	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points3	Array[1..4] of LReal	474.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points3[1]	LReal	474.0	-1165.908	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points3[2]	LReal	482.0	1747.494	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points3[3]	LReal	490.0	1425.88	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points3[4]	LReal	498.0	114.199	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points4	Array[1..4] of LReal	506.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points4[1]	LReal	506.0	-1165.909	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points4[2]	LReal	514.0	1747.495	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points4[3]	LReal	522.0	405.337	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points4[4]	LReal	530.0	114.199	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points5	Array[1..4] of LReal	538.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points5[1]	LReal	538.0	-1190.424	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points5[2]	LReal	546.0	2614.553	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points5[3]	LReal	554.0	405.336	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points5[4]	LReal	562.0	114.199	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points6	Array[1..4] of LReal	570.0		False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points6[1]	LReal	570.0	-1000.608	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points6[2]	LReal	578.0	2197.655	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points6[3]	LReal	586.0	420.275	False	True	True	True	False		
+	MainRobotLeft_StackingLeft_Points6[4]	LReal	594.0	114.199	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points1	Array[1..4] of LReal	602.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points1[1]	LReal	602.0	1336.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points1[2]	LReal	610.0	-1089.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points1[3]	LReal	618.0	1208.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points1[4]	LReal	626.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points2	Array[1..4] of LReal	634.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points2[1]	LReal	634.0	615.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points2[2]	LReal	642.0	-1521.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points2[3]	LReal	650.0	1381.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points2[4]	LReal	658.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points3	Array[1..4] of LReal	666.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points3[1]	LReal	666.0	-874.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points3[2]	LReal	674.0	-1389.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points3[3]	LReal	682.0	1381.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points3[4]	LReal	690.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points4	Array[1..4] of LReal	698.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points4[1]	LReal	698.0	-874.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points4[2]	LReal	706.0	-1389.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points4[3]	LReal	714.0	355.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points4[4]	LReal	722.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points5	Array[1..4] of LReal	730.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points5[1]	LReal	730.0	-874.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points5[2]	LReal	738.0	-1687.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points5[3]	LReal	746.0	355.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points5[4]	LReal	754.0	0.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points6	Array[1..4] of LReal	762.0		False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points6[1]	LReal	762.0	-874.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points6[2]	LReal	770.0	-1389.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points6[3]	LReal	778.0	1381.0	False	True	True	True	False		
+	MainRobotLeft_StackingRight_Points6[4]	LReal	786.0	0.0	False	True	True	True	False		
+	MainRobotLeft_AccessControl	Int	794.0	0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Speed	Array[1..4] of LReal	796.0		False	True	True	True	False		
+	MainRobotLeft_Dynamic_Speed[1]	LReal	796.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Speed[2]	LReal	804.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Speed[3]	LReal	812.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Speed[4]	LReal	820.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Torque	Array[1..4] of LReal	828.0		False	True	True	True	False		
+	MainRobotLeft_Dynamic_Torque[1]	LReal	828.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Torque[2]	LReal	836.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Torque[3]	LReal	844.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Dynamic_Torque[4]	LReal	852.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits	Array[1..4, 1..2] of LReal	860.0		False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[1,1]	LReal	860.0	-185.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[1,2]	LReal	868.0	185.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[2,1]	LReal	876.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[2,2]	LReal	884.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[3,1]	LReal	892.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[3,2]	LReal	900.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[4,1]	LReal	908.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Limits[4,2]	LReal	916.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Power	Array[1..4] of LReal	924.0		False	True	True	True	False		
+	MainRobotLeft_Axis_Power[1]	LReal	924.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Power[2]	LReal	932.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Power[3]	LReal	940.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Axis_Power[4]	LReal	948.0	0.0	False	True	True	True	False		
+	MainRobotLeft_Motion_Active	Bool	956.0	false	False	True	True	True	False		
+	MainRobotLeft_Emergency_Stop_Active	Bool	956.1	false	False	True	True	True	False		
+	MainRobotLeft_Error_Code	Int	958.0	0	False	True	True	True	False		
+	MainRobotLeft_EnableAll	Bool	960.0	false	False	True	True	True	False		
+	MainRobotLeft_EnableKinematics	Bool	960.1	false	False	True	True	True	False		
+	MainRobotLeft_Auto_Mode	Bool	960.2	false	False	True	True	True	False		
+	MainRobotLeft_Stacking2Left	Bool	960.3	false	False	True	True	True	False		
+	MainRobotLeft_Stacking2Right	Bool	960.4	false	False	True	True	True	False		
+	MainRobotLeft_Go2HomePos	Bool	960.5	false	False	True	True	True	False		
+	MainRobotLeft_TargetX	LReal	962.0	0.0	False	True	True	True	False		
+	MainRobotLeft_TargetY	LReal	970.0	0.0	False	True	True	True	False		
+	MainRobotLeft_TargetZ	LReal	978.0	0.0	False	True	True	True	False		
+	MainRobotLeft_CmdAck	Bool	986.0	false	False	True	True	True	False		
+	MainRobotLeft_CmdEnable	Bool	986.1	false	False	True	True	True	False		
+	MainRobotLeft_MoveEnable	Bool	986.2	false	False	True	True	True	False		
+	MainRobotLeft_ResetCmd	Bool	986.3	false	False	True	True	True	False		
+	MainRobotLeft_ResetDone	Bool	986.4	false	False	True	True	True	False		
+	Heartbeat_Counter	DInt	988.0	0	False	True	True	True	False		
+	Heartbeat_Timestamp	DTL	992.0	DTL#1970-01-01-00:00:00	False	True	True	True	False		
+	YEAR	UInt	992.0	1970	False	True	True	True	False		
+	MONTH	USInt	994.0	1	False	True	True	True	False		
+	DAY	USInt	995.0	1	False	True	True	True	False		
+	WEEKDAY	USInt	996.0	5	False	True	True	True	False		
+	HOUR	USInt	997.0	0	False	True	True	True	False		
+	MINUTE	USInt	998.0	0	False	True	True	True	False		
+	SECOND	USInt	999.0	0	False	True	True	True	False		
+	NANOSECOND	UDInt	1000.0	0	False	True	True	True	False		
+	ROS_Ack_Counter	DInt	1004.0	0	False	True	True	True	False		
+	ROS_Ack_Timestamp	DTL	1008.0	DTL#1970-01-01-00:00:00	False	True	True	True	False		
+	YEAR	UInt	1008.0	1970	False	True	True	True	False		
+	MONTH	USInt	1010.0	1	False	True	True	True	False		
+	DAY	USInt	1011.0	1	False	True	True	True	False		
+	WEEKDAY	USInt	1012.0	5	False	True	True	True	False		
+	HOUR	USInt	1013.0	0	False	True	True	True	False		
+	MINUTE	USInt	1014.0	0	False	True	True	True	False		
+	SECOND	USInt	1015.0	0	False	True	True	True	False		
+	NANOSECOND	UDInt	1016.0	0	False	True	True	True	False		
+	ROS_Alive	Bool	1020.0	false	False	True	True	True	False		
+	Comm_State	Int	1022.0	0	False	True	True	True	False		
+	Comm_LostCount	DInt	1024.0	0	False	True	True	True	False		
+	HB_Timeout_Mult	Int	1028.0	50	False	True	True	True	False		

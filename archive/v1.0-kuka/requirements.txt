@@ -1,0 +1,7 @@
+# Linux side
+rclpy              # from ROS 2 Humble
+ruckig>=0.9.0
+numpy>=1.24.0
+
+# Windows side
+pythonnet          # for PLCSIM Advanced API

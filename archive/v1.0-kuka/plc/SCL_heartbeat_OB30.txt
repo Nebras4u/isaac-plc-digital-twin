@@ -1,0 +1,72 @@
+// ==========================================================================
+// OB30 — Cyclic Interrupt (20 ms)
+// SECTION 6: HEARTBEAT MASTER — PLC as Time Master for ROS Bridge
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// 6.1 Advance heartbeat counter (مع معالجة rollover عند 2^31)
+// --------------------------------------------------------------------------
+IF "MAIN_KUKA_KR210_L150_L".Heartbeat_Counter >= 2147483647 THEN
+    "MAIN_KUKA_KR210_L150_L".Heartbeat_Counter := 0;
+ELSE
+    "MAIN_KUKA_KR210_L150_L".Heartbeat_Counter := "MAIN_KUKA_KR210_L150_L".Heartbeat_Counter + 1;
+END_IF;
+
+// --------------------------------------------------------------------------
+// 6.2 Update PLC timestamp (DTL)
+// --------------------------------------------------------------------------
+#retVal := RD_LOC_T(OUT => "MAIN_KUKA_KR210_L150_L".Heartbeat_Timestamp);
+
+// --------------------------------------------------------------------------
+// 6.3 Compute heartbeat age (بالدورات — الأدق والأبسط)
+//     الفرق بين counter الحالي و counter آخر Ack من ROS
+// --------------------------------------------------------------------------
+#HB_Age := "MAIN_KUKA_KR210_L150_L".Heartbeat_Counter
+- "MAIN_KUKA_KR210_L150_L".ROS_Ack_Counter;
+
+// rollover أو Ack مستقبلي → اعتبره فشل
+IF #HB_Age < 0 THEN
+    #HB_Age := 9999;
+END_IF;
+
+// --------------------------------------------------------------------------
+// 6.4 State machine للاتصال
+// --------------------------------------------------------------------------
+CASE "MAIN_KUKA_KR210_L150_L".Comm_State OF
+        
+    0:  // -------- OK --------
+        IF #HB_Age > "MAIN_KUKA_KR210_L150_L".HB_Timeout_Mult THEN
+            "MAIN_KUKA_KR210_L150_L".Comm_State := 1;   // Late
+            "MAIN_KUKA_KR210_L150_L".Comm_LostCount :=
+            "MAIN_KUKA_KR210_L150_L".Comm_LostCount + 1;
+        END_IF;
+        
+    1:  // -------- Late (انتظر دورة إضافية) --------
+        IF #HB_Age > ("MAIN_KUKA_KR210_L150_L".HB_Timeout_Mult * 2) THEN
+            "MAIN_KUKA_KR210_L150_L".Comm_State := 2;   // Dead
+            "MAIN_KUKA_KR210_L150_L".ROS_Alive := FALSE;
+        ELSIF #HB_Age <= "MAIN_KUKA_KR210_L150_L".HB_Timeout_Mult THEN
+            "MAIN_KUKA_KR210_L150_L".Comm_State := 0;   // عاد OK
+        END_IF;
+        
+    2:  // -------- Dead (توقف آمن) --------
+        "MAIN_KUKA_KR210_L150_L".ROS_Alive := FALSE;
+        "MAIN_KUKA_KR210_L150_L".MainRobotLeft_CmdEnable := FALSE;
+        IF #HB_Age <= "MAIN_KUKA_KR210_L150_L".HB_Timeout_Mult THEN
+            "MAIN_KUKA_KR210_L150_L".Comm_State := 0;   // استرجاع
+        END_IF;
+        
+    3:  // -------- BadAck (قيمة غير صالحة) --------
+        "MAIN_KUKA_KR210_L150_L".ROS_Alive := FALSE;
+        "MAIN_KUKA_KR210_L150_L".MainRobotLeft_CmdEnable := FALSE;
+        IF #HB_Age >= 0 AND #HB_Age <= "MAIN_KUKA_KR210_L150_L".HB_Timeout_Mult THEN
+            "MAIN_KUKA_KR210_L150_L".Comm_State := 0;
+        END_IF;
+        
+END_CASE;
+
+// --------------------------------------------------------------------------
+// 6.5 ROS_Alive flag
+// --------------------------------------------------------------------------
+"MAIN_KUKA_KR210_L150_L".ROS_Alive :=
+("MAIN_KUKA_KR210_L150_L".Comm_State = 0);
