@@ -1,8 +1,8 @@
-# KUKA KR210 Digital Twin — Industrial PLC Handshake
+# yaskawa Digital Twin — Industrial PLC Handshake
 
-A **Digital Twin** of a KUKA KR210 industrial robot, built to demonstrate industrial-grade engineering: a real Siemens S7-1500 PLC drives the control loop through an OPC UA heartbeat protocol, while a physics simulation in NVIDIA Isaac Sim responds in real time.
+A **Digital Twin** of a yaskawa industrial robot, built to demonstrate industrial-grade engineering: a real Siemens S7-1500 PLC drives the control loop through an OPC UA heartbeat protocol, while a physics simulation in NVIDIA Isaac Sim responds in real time.
 
-The project is explicitly **not** a toy. It mirrors the architecture of real industrial cells: PLC as cycle master, KRC (KUKA Robot Controller) as trajectory generator, and the robot as the physical system. The only difference is that the robot lives in simulation rather than on the shop floor.
+The project is explicitly **not** a toy. It mirrors the architecture of real industrial cells: PLC as cycle master, KRC (yaskawa Robot Controller) as trajectory generator, and the robot as the physical system. The only difference is that the robot lives in simulation rather than on the shop floor.
 
 ---
 
@@ -71,7 +71,7 @@ The full reasoning behind every architectural choice: docs/engineering_decisions
     ├── config.py              Central configuration (single source of truth)
     ├── joint_map.py           Pure unit-conversion functions
     ├── plc_client.py          OPC UA transport layer (S7-1500 compatible)
-    ├── krc_twin.py            Digital twin of the KUKA Robot Controller
+    ├── krc_twin.py            Digital twin of the yaskawa Robot Controller
     ├── requirements.txt
     ├── LICENSE
     ├── .gitignore
@@ -105,7 +105,7 @@ The full reasoning behind every architectural choice: docs/engineering_decisions
 
 ## Components
 
-### krc_twin.py — Digital twin of the KUKA Robot Controller
+### krc_twin.py — Digital twin of the yaskawa Robot Controller
 
 The industrial heart of the project. It runs two independent loops:
 
@@ -178,7 +178,7 @@ See docs/commissioning.md for detailed setup.
 3. In a Linux terminal:
 
     source /opt/ros/humble/setup.bash
-    cd kuka-digital-twin
+    cd yaskawa-digital-twin
     python3 krc_twin.py
 
    Expected output:
