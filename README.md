@@ -1,10 +1,12 @@
 # Isaac Digital Twin — Multi-Robot Platform
 
-[![License](https://shields.io)](LICENSE)
-[![Siemens](https://shields.io)](https://siemens.com)
-[![ROS 2](https://shields.io)](https://ros.org)
-[![Isaac Sim](https://shields.io)](https://nvidia.com)
-[![Python](https://shields.io)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Siemens](https://img.shields.io/badge/Siemens-S7--1500-orange)](https://www.siemens.com)
+[![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
+[![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.0-green)](https://developer.nvidia.com/isaac-sim)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-yellow)](https://www.python.org)
+[![Last Commit](https://img.shields.io/github/last-commit/Nebras4u/isaac-plc-digital-twin-v2)](https://github.com/Nebras4u/isaac-plc-digital-twin-v2)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 
 An industrial-grade **Digital Twin platform** for robot arms driven by **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through **ROS 2**.
 
@@ -47,22 +49,22 @@ A complete five-layer Digital Twin with:
 
 ```text
 [PLC S7-1500] ←TCP/JSON→ [Windows Server] ←TCP/JSON→ [Linux Bridge]
-                                                            ↓
-                                                     [KRC Digital Twin]
-                                                            ↓
-                                                       [Isaac Sim]
+                                                              │
+                                                       [KRC Digital Twin]
+                                                              │
+                                                          [Isaac Sim]
 ```
 
 ### Performance (Verified)
 
 | Metric | Value |
 | :--- | :--- |
-| Tracking error (max) | 0.0254° |
-| Control rate | 60 Hz |
-| PLC poll rate | 20 Hz |
-| Heartbeat rate | 50 Hz |
-| Clock drift | -0.065 ppm |
-| Asymmetry bound | ±16 µs |
+| **Tracking error (max)** | 0.0254° |
+| **Control rate** | 60 Hz |
+| **PLC poll rate** | 20 Hz |
+| **Heartbeat rate** | 50 Hz |
+| **Clock drift** | -0.065 ppm |
+| **Asymmetry bound** | ±16 µs |
 
 For full technical documentation, see [`kuka/docs/PROJECT_DOCUMENTATION.txt`](kuka/docs/PROJECT_DOCUMENTATION.txt).
 
@@ -73,7 +75,6 @@ For full technical documentation, see [`kuka/docs/PROJECT_DOCUMENTATION.txt`](ku
 This repository contains two generations of the same platform.
 
 ### Generation 1 — Yaskawa GP110 (Reference)
-
 * **Location:** [`yaskawa/`](yaskawa/)
 
 The initial implementation focused on Yaskawa GP110 with:
@@ -92,7 +93,6 @@ This generation is preserved as a **technical reference**, especially for:
 For full documentation, see [`yaskawa/docs/README_full.md`](yaskawa/docs/README_full.md).
 
 ### Generation 2 — KUKA KR210 (Active)
-
 * **Location:** [`kuka/`](kuka/)
 
 The current development line. Migrated from Yaskawa GP110 to KUKA KR210 with a focus on:
@@ -147,20 +147,18 @@ isaac-plc-digital-twin-v2/
 │   │   └── cli.py
 │   ├── windows/
 │   │   └── plc_server_win.py
-│   ├── docs/
-│   │   ├── PROJECT_DOCUMENTATION.txt
-│   │   └── commissioning.md
-│   ├── config/
-│   └── data/calibration/
+│   └── docs/
+│       ├── PROJECT_DOCUMENTATION.txt
+│       └── commissioning.md
 │
 └── yaskawa/                            # Reference — Yaskawa GP110
     ├── plc_bridge/
     ├── isaac_sim/
     ├── PLC_1500T/
     ├── aas/
-    ├── docs/
-    │   └── README_full.md
-    └── images/
+    └── docs/
+        ├── README_full.md
+        └── images/
 ```
 
 ---
@@ -294,8 +292,8 @@ MIT License. See [LICENSE](LICENSE) for details.
 ## Contact
 
 * **Developer:** Nebras — nebras4u@gmail.com
-* **GitHub Profile:** [Nebras4u](https://github.com)
-* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/isaac-plc-digital-twin)
+* **GitHub Profile:** [Nebras4u](https://github.com/Nebras4u)
+* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/Nebras4u/isaac-plc-digital-twin-v2)
 * **YouTube Playlist:** [Videos & Demos](https://youtube.com)
 
 ***
