@@ -86,7 +86,7 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 ## Contact
 
 * **Developer:** Nebras — nebras4u@gmail.com
-* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/Nebras4u/isaac-plc-digital-twin)
+* **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
 
 ***
 
