@@ -122,7 +122,6 @@ vendor-neutral/
 │   └── Full_Control.usd
 │
 ├── config/
-│   ├── robot.yaml                    # Robot description
 │   └── plc_ros_bridge.yaml           # Signal mapping
 │
 ├── tools/
@@ -140,7 +139,6 @@ vendor-neutral/
 │   └── DB.txt
 │
 └── docs/
-    ├── README_full.md
     └── migration.md
 ```
 
@@ -217,10 +215,6 @@ python3 -m pytest ../tests -v
 ---
 
 ## Configuration
-
-### `config/robot.yaml` — Robot description
-
-Describes joints, limits, drives, Ruckig params. Currently the KRC twin reads these inline; migration to YAML is scheduled for v3.1.
 
 ### `config/plc_ros_bridge.yaml` — Signal mapping
 
@@ -344,7 +338,7 @@ MIT License. See [LICENSE](LICENSE).
 ## Contact
 
 * **Developer:** Nebras — nebras4u@gmail.com
-* **Repository:** [isaac-plc-digital-twin-v2](https://github.com/Nebras4u/isaac-plc-digital-twin)
+* **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
 * **Location:** `vendor-neutral/`
 
 ***
