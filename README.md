@@ -76,8 +76,8 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 | Document | Description |
 | :--- | :--- |
 | [`vendor-neutral/README.md`](vendor-neutral/README.md) | Gen 3 (active) — vendor-neutral platform |
-| [`archive/v1.0-kuka/README.md`](archive/v1.0-kuka/README.md) | Gen 1 — KUKA KR210 |
-| [`archive/v0.2-yaskawa/docs/README_full.md`](archive/v0.2-yaskawa/docs/README_full.md) | Gen 2 — Yaskawa GP110 |
+| [`archive/v1.0-kuka/README.md`](kuka/README.md) | Gen 1 — KUKA KR210 |
+| [`archive/v0.2-yaskawa/docs/README_full.md`](yaskawa/README.md) | Gen 2 — Yaskawa GP110 |
 | [`CHANGELOG.md`](CHANGELOG.md) | All generations |
 | [`docs/comparison.md`](docs/comparison.md) | Side-by-side comparison |
 
