@@ -36,14 +36,32 @@ Highlights:
 
 ---
 
+## Future Vision
+
+The vendor-neutral philosophy is being extended beyond robots and PLCs to the
+**simulation layer** itself.
+
+- **Isaac Sim** remains a first-class target, but will also be brought under the
+  same vendor-neutral abstraction — so the digital twin is no longer locked to a
+  single simulator.
+- **CoppeliaSim** will be added as a **proof of concept** for multi-simulator
+  support, demonstrating that the same PLC bridge, robot description, and
+  trajectory stack can drive more than one physics engine through a thin,
+  config-driven adapter.
+
+The long-term goal is a fully portable digital twin: change the robot, the PLC,
+or the simulator by editing configuration — not by rewriting the core platform.
+
+---
+
 ## Repository Layout
 
 ```text
 .
 ├── vendor-neutral/       # Active — Gen 3 (vendor-neutral platform)
 ├── archive/
-│   ├── v1.0-kuka/        # Gen 1 — KUKA KR210 (TCP/JSON)
-│   └── v0.2-yaskawa/     # Gen 2 — Yaskawa GP110 (OPC UA)
+│   ├── kuka/        # Gen 1 — KUKA KR210 (TCP/JSON)
+│   └── yaskawa/     # Gen 2 — Yaskawa GP110 (OPC UA)
 └── docs/                 # Cross-generation documentation
 ```
 
@@ -76,8 +94,8 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 | Document | Description |
 | :--- | :--- |
 | [`vendor-neutral/README.md`](vendor-neutral/README.md) | Gen 3 (active) — vendor-neutral platform |
-| [`archive/v1.0-kuka/README.md`](kuka/README.md) | Gen 1 — KUKA KR210 |
-| [`archive/v0.2-yaskawa/docs/README_full.md`](yaskawa/README.md) | Gen 2 — Yaskawa GP110 |
+| [`kuka/README.md`](kuka/README.md) | Gen 1 — KUKA KR210 |
+| [`yaskawa/README.md`](yaskawa/README.md) | Gen 2 — Yaskawa GP110 |
 | [`CHANGELOG.md`](CHANGELOG.md) | All generations |
 | [`docs/comparison.md`](docs/comparison.md) | Side-by-side comparison |
 
