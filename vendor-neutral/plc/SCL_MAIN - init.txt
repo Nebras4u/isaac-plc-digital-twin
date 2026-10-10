@@ -1,0 +1,15 @@
+	Input			
+	Initial_Call	Bool		Initial call of this OB
+	Remanence	Bool		=True, if remanent data are available
+	Temp			
+	Temp_Transition_Blend	Array[1..5] of LReal		
+	Temp_Transition_Stop	Array[1..5] of LReal		
+	Robot_Step	Int		
+	System_Hardware_Ready	Bool		
+	Trigger_Motion	Bool		
+	Old_Kinematics_State	Bool		
+	non	Bool		
+	ResetCmd_Rising	Bool		
+	Old_ResetCmd	Bool		
+	Constant			
+				

@@ -1,0 +1,8 @@
+	Input			
+	Initial_Call	Bool		Initial call of this OB
+	Event_Count	Int		Events discarded
+	Temp			
+	HB_Age	DInt		
+	retVal	Int		
+	Constant			
+				

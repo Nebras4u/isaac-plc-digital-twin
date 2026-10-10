@@ -1,0 +1,56 @@
+# To change PLC: change "plc.driver" and the addr values. Logic stays the same.
+plc:
+  driver: tcp_json            # tcp_json | opcua
+  host: 192.168.100.18
+  port: 5000
+  timeout: 0.015
+  # --- for opcua instead ---
+  # driver: opcua
+  # endpoint: opc.tcp://192.168.0.1:4840
+
+poll_hz: 60
+
+vars:
+  db: MAIN_KUKA_KR210_L150_L  # replaces {db} inside addr
+
+# Logical name -> PLC address. dir: read (PLC -> ROS) | write (ROS -> PLC)
+signals:
+  cmd_ang_1:  {addr: "{db}.MainRobotLeft_CmdAng[1]", type: float, dir: read}
+  cmd_ang_2:  {addr: "{db}.MainRobotLeft_CmdAng[2]", type: float, dir: read}
+  cmd_ang_3:  {addr: "{db}.MainRobotLeft_CmdAng[3]", type: float, dir: read}
+  cmd_ang_4:  {addr: "{db}.MainRobotLeft_CmdAng[4]", type: float, dir: read}
+  cmd_enable: {addr: "{db}.MainRobotLeft_CmdEnable", type: bool, dir: read}
+  velocity:   {addr: "{db}.MainRobotLeft_Vlcty", type: float, dir: read}
+  estop:      {addr: "{db}.MainRobotLeft_Emergency_Stop_Active", type: bool, dir: read}
+  hb_counter: {addr: "{db}.Heartbeat_Counter", type: int, dir: read}
+  comm_state: {addr: "{db}.Comm_State", type: int, dir: read}
+  ros_alive:  {addr: "{db}.ROS_Alive", type: bool, dir: read}
+
+  act_ang_1:  {addr: "{db}.MainRobotLeft_ActAng[1]", type: float, dir: write}
+  act_ang_2:  {addr: "{db}.MainRobotLeft_ActAng[2]", type: float, dir: write}
+  act_ang_3:  {addr: "{db}.MainRobotLeft_ActAng[3]", type: float, dir: write}
+  act_ang_4:  {addr: "{db}.MainRobotLeft_ActAng[4]", type: float, dir: write}
+  cmd_ack:    {addr: "{db}.MainRobotLeft_CmdAck", type: bool, dir: write}
+  ros_ack_counter: {addr: "{db}.ROS_Ack_Counter", type: int, dir: write}
+
+# signal -> ROS topic
+publish:
+  - {topic: /plc/velocity,       signal: velocity,   type: float}
+  - {topic: /plc/axis_enable,    signal: cmd_enable, type: bool}
+  - {topic: /plc/emergency_stop, signal: estop,      type: bool}
+  - {topic: /plc/ros_alive,      signal: ros_alive,  type: bool}
+  - {topic: /plc/comm_state,     signal: comm_state, type: int}
+
+# Heartbeat: ROS echoes the PLC counter back
+heartbeat:
+  counter: hb_counter
+  ack: ros_ack_counter
+
+# Joint mapping (index = axis order). Angles in degrees on the PLC side.
+robot:
+  joints:  [joint_1, joint_2, joint_3, joint_4]
+  cmd_ang: [cmd_ang_1, cmd_ang_2, cmd_ang_3, cmd_ang_4]   # -> /plc/cmd_ang
+  act_ang: [act_ang_1, act_ang_2, act_ang_3, act_ang_4]   # <- /joint_states
+  cmd_ack: cmd_ack
+  cmd_ang_topic: /plc/cmd_ang
+  joint_states_topic: /joint_states
