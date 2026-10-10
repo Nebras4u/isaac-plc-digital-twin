@@ -12,8 +12,8 @@ The repository hosts three generations of the platform, side by side:
 | Generation | Robot | Transport | Location | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **Gen 3 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api | [`vendor-neutral/`](vendor-neutral/) | ✅ **Active** |
-| Gen 2 — Yaskawa GP110 | Yaskawa GP110 | OPC UA | [`archive/v0.2-yaskawa/`](archive/v0.2-yaskawa/) | ⏸️ Reference |
-| Gen 1 — KUKA KR210 | KUKA KR210 L150 L | TCP/JSON | [`archive/v1.0-kuka/`](archive/v1.0-kuka/) | ⏸️ Reference |
+| Gen 2 — Yaskawa GP110 | Yaskawa GP110 | OPC UA | [`yaskawa/`](yaskawa/) | ⏸️ Reference |
+| Gen 1 — KUKA KR210 | KUKA KR210 L150 L | TCP/JSON | [`kuka/`](kuka/) | ⏸️ Reference |
 
 ---
 
