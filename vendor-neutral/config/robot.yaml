@@ -1,0 +1,39 @@
+# robot.yaml
+# Change this file to switch robot. No Python changes needed.
+
+robot:
+  name: KUKA_KR210_L150_L
+  description: "KUKA KR210 L150 L — 4 controlled axes + 1 passive"
+
+  all_joints:        [joint_1, joint_2, joint_3, joint_5, joint_4]
+  controlled_joints: [joint_1, joint_2, joint_3, joint_4]
+
+  limits_deg:
+    joint_1: [-185.0, 185.0]
+    joint_2: [-188.0,   35.0]
+    joint_3: [-114.6, 143.2]
+    joint_4: [-350.0, 350.0]
+
+  isaac_path:  /World/Main_Robot_L_URDF/base_link
+  isaac_scope: /World/Main_Robot_L_URDF
+
+  joint_paths:
+    joint_1: "{scope}/base_link/joint_1"
+    joint_2: "{scope}/link_1/joint_2"
+    joint_3: "{scope}/link_2/joint_3"
+    joint_4: "{scope}/link_4/joint_4"
+    joint_5: "{scope}/link_3/joint_5"
+
+  ruckig:
+    control_hz: 60.0
+    max_vel:  3.0
+    max_acc: 10.0
+    max_jerk: 80.0
+    jump_threshold_rad: 0.30
+
+  drives:
+    joint_1: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
+    joint_2: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
+    joint_3: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
+    joint_4: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}
+    joint_5: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}

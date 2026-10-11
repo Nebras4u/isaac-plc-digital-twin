@@ -1,0 +1,283 @@
+{
+  "meta": {
+    "tool": "cli.py",
+    "tool_version": "2.0",
+    "protocol": "CLK1",
+    "utc": "20261010_225148",
+    "host": "DESKTOP-00KILOM",
+    "platform": "Windows-10-10.0.19044-SP0",
+    "python": "3.12.3",
+    "cpu_count": 4,
+    "clocksource": null,
+    "local_clock": {
+      "kind": "perf",
+      "name": "perf_counter_ns",
+      "resolution_ns": 100.0,
+      "min_step_ns": 100,
+      "call_cost_ns": 87.825
+    },
+    "tuning": {
+      "gc": "disabled"
+    },
+    "peer": "192.168.100.1:9999",
+    "peer_info": {
+      "tool": "srv.py",
+      "tool_version": "2.0",
+      "protocol": "CLK1",
+      "host": "Nebras",
+      "platform": "Linux-7.0.0-34-generic-x86_64-with-glibc2.39",
+      "python": "3.12.3",
+      "pid": 241396,
+      "cpu_count": 24,
+      "clocksource": "tsc",
+      "clock": {
+        "kind": "perf",
+        "name": "perf_counter_ns",
+        "resolution_ns": 1.0,
+        "min_step_ns": 60,
+        "call_cost_ns": 71.92615
+      },
+      "tuning": {
+        "gc": "disabled"
+      }
+    },
+    "peer_clock_label": "",
+    "session_id": 1242189364,
+    "seed": 1537730683,
+    "warnings": [],
+    "params": {
+      "peer": "192.168.100.1",
+      "port": 9999,
+      "duration": 600.0,
+      "interval": 0.002,
+      "timeout": 0.2,
+      "warmup": 200,
+      "fit_frac": 0.1,
+      "window": 30.0,
+      "bin": 1.0,
+      "clock": "auto",
+      "peer_label": "",
+      "out": null,
+      "track": false,
+      "period": 1.0,
+      "burst": 50,
+      "cpu": null,
+      "rt": null,
+      "seed": 1537730683,
+      "analyze": null,
+      "lost": 0,
+      "bin_set": false
+    }
+  },
+  "result": {
+    "schema_version": 2,
+    "received": 197732,
+    "lost": 0,
+    "loss_pct": 0.0,
+    "duration_s": 599.9870071,
+    "offset_convention": "peer_clock - local_clock",
+    "t0_local_ns": 8831459966700,
+    "rtt_ms": {
+      "min": 0.036647,
+      "median": 0.358236,
+      "p95": 0.583894,
+      "max": 10.397855
+    },
+    "fit": {
+      "n": 19773,
+      "frac": 0.1,
+      "drift_ppm": -229.87518222678486,
+      "drift_se_ppm": 4.534251351263558,
+      "offset_at_t0_ms": -3702383.5405595093,
+      "offset_at_end_ms": -3702521.4626821,
+      "residual_std_ms": 103.81539546269104
+    },
+    "series": {
+      "n_points": 600,
+      "bin_s": 1.0,
+      "theil_sen_drift_ppm": -306.10306888857525,
+      "ls_drift_ppm": -346.6500509393764,
+      "ls_se_ppm": 24.753184272642507,
+      "residual_std_ms": 104.83950526526898,
+      "possible_step": {
+        "t_s": 344.5483605,
+        "size_ms": -41.976542825512354
+      },
+      "coverage": 1.0,
+      "adev": [
+        {
+          "tau_s": 1.0,
+          "adev_ppm": 1784.6202213082624,
+          "n": 598
+        },
+        {
+          "tau_s": 2.0,
+          "adev_ppm": 1307.6548210592455,
+          "n": 596
+        },
+        {
+          "tau_s": 4.0,
+          "adev_ppm": 1448.2938386068176,
+          "n": 592
+        },
+        {
+          "tau_s": 8.0,
+          "adev_ppm": 1661.429467744968,
+          "n": 584
+        },
+        {
+          "tau_s": 16.0,
+          "adev_ppm": 1757.5176594470418,
+          "n": 568
+        },
+        {
+          "tau_s": 32.0,
+          "adev_ppm": 1680.5069724213963,
+          "n": 536
+        },
+        {
+          "tau_s": 64.0,
+          "adev_ppm": 1416.806746648813,
+          "n": 472
+        },
+        {
+          "tau_s": 128.0,
+          "adev_ppm": 1285.6046245424216,
+          "n": 344
+        },
+        {
+          "tau_s": 256.0,
+          "adev_ppm": 1578.1239044294496,
+          "n": 88
+        }
+      ]
+    },
+    "asymmetry_bound_ms": 0.0183235,
+    "windows": [
+      {
+        "t_start_s": 0.0,
+        "drift_ppm": -805.7887127006117,
+        "se_ppm": 2.0793774310266984,
+        "n": 3294
+      },
+      {
+        "t_start_s": 30.0,
+        "drift_ppm": -216.17705782759123,
+        "se_ppm": 0.7933655539187323,
+        "n": 3311
+      },
+      {
+        "t_start_s": 60.0,
+        "drift_ppm": 3.46589636190794,
+        "se_ppm": 0.3218288044096278,
+        "n": 3328
+      },
+      {
+        "t_start_s": 90.0,
+        "drift_ppm": 225.45303309507537,
+        "se_ppm": 4.786005231492409,
+        "n": 3368
+      },
+      {
+        "t_start_s": 120.0,
+        "drift_ppm": 2775.5423674186077,
+        "se_ppm": 4.8395684442148,
+        "n": 3304
+      },
+      {
+        "t_start_s": 150.0,
+        "drift_ppm": 1401.4882618298209,
+        "se_ppm": 1.856734417659976,
+        "n": 3305
+      },
+      {
+        "t_start_s": 180.0,
+        "drift_ppm": 845.2755511598243,
+        "se_ppm": 0.8554397175124169,
+        "n": 3327
+      },
+      {
+        "t_start_s": 210.0,
+        "drift_ppm": 633.1541086572993,
+        "se_ppm": 0.28988901596838623,
+        "n": 3277
+      },
+      {
+        "t_start_s": 240.0,
+        "drift_ppm": 552.2806851887492,
+        "se_ppm": 0.12642133988649973,
+        "n": 3264
+      },
+      {
+        "t_start_s": 270.0,
+        "drift_ppm": 519.585391977026,
+        "se_ppm": 0.0762748315774092,
+        "n": 3273
+      },
+      {
+        "t_start_s": 300.0,
+        "drift_ppm": 507.6134385425086,
+        "se_ppm": 0.07452475519342806,
+        "n": 3278
+      },
+      {
+        "t_start_s": 330.0,
+        "drift_ppm": -9700.01353177638,
+        "se_ppm": 62.8396404563376,
+        "n": 3269
+      },
+      {
+        "t_start_s": 360.0,
+        "drift_ppm": -750.1348521955796,
+        "se_ppm": 9.227544104849912,
+        "n": 3280
+      },
+      {
+        "t_start_s": 390.0,
+        "drift_ppm": -310.58664153916203,
+        "se_ppm": 0.4659203352484674,
+        "n": 3291
+      },
+      {
+        "t_start_s": 420.0,
+        "drift_ppm": -810.8338660481534,
+        "se_ppm": 5.324495666346188,
+        "n": 3278
+      },
+      {
+        "t_start_s": 450.0,
+        "drift_ppm": -1137.6952579512626,
+        "se_ppm": 1.4456131523058509,
+        "n": 3281
+      },
+      {
+        "t_start_s": 480.0,
+        "drift_ppm": -739.3266182591369,
+        "se_ppm": 0.4960729026794537,
+        "n": 3297
+      },
+      {
+        "t_start_s": 510.0,
+        "drift_ppm": -596.1174160420458,
+        "se_ppm": 0.20980439419288757,
+        "n": 3286
+      },
+      {
+        "t_start_s": 540.0,
+        "drift_ppm": -540.1293346327943,
+        "se_ppm": 0.13920062279070775,
+        "n": 3293
+      }
+    ],
+    "drift_resolution_ppm": 346.0588120548687,
+    "drift_range_ppm": 12475.555899194987,
+    "notes": [
+      "possible clock step/slew change at t=344.5s (-41.977 ms): check time sync on both machines",
+      "drift varies across windows (12475.6 ppm range): use --track and correct continuously",
+      "residual std exceeds min RTT: a straight line describes the offset poorly",
+      "slope resolution is only ~346.1 ppm: run longer (10+ min) or use a quieter link",
+      "estimators disagree by 76.23 ppm (least squares vs Theil-Sen): inspect the raw data"
+    ],
+    "quality": "check notes"
+  }
+}

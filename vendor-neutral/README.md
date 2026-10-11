@@ -6,6 +6,8 @@
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.0-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-yellow)](https://www.python.org)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
+[![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#control-loop-latency)
+[![Max](https://img.shields.io/badge/Max%20latency-16.3%20ms-success)](#control-loop-latency)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms. The platform synchronizes any robot arm with any PLC through ROS 2, using a transport-agnostic bridge and a robot-agnostic configuration format.
 
@@ -23,6 +25,10 @@ This folder (`vendor-neutral/`) is the evolution of two robot-specific implement
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Results](#results)
+  - [Tracking Accuracy](#tracking-accuracy)
+  - [Control-Loop Latency](#control-loop-latency)
+  - [Clock Drift Calibration](#clock-drift-calibration)
+- [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
 - [Lineage](#lineage)
 - [Roadmap](#roadmap)
@@ -51,11 +57,11 @@ The main nodes (`krc_twin.py`, `plc_ros_bridge.py`, `physics_twin.py`) stay focu
 
 ## What "Vendor-Neutral" Means
 
-| Axis | Before | Now |
-| :--- | :--- | :--- |
-| **PLC vendor** | Siemens only | Any PLC with OPC UA, TCP/JSON, or PLCSIM API |
-| **Robot vendor** | KUKA only, then Yaskawa only | Any articulated robot described in `robot.yaml` |
-| **Transport** | TCP/JSON only, then OPC UA only | Selected by a single YAML line |
+| Axis             | Before                          | Now                                             |
+| :----------------| :-------------------------------| :-----------------------------------------------|
+| **PLC vendor**   | Siemens only                    | Any PLC with OPC UA, TCP/JSON, or PLCSIM API    |
+| **Robot vendor** | KUKA only, then Yaskawa only    | Any articulated robot described in `robot.yaml` |
+| **Transport**    | TCP/JSON only, then OPC UA only | Selected by a single YAML line                  |
 
 The same code runs unchanged across all combinations. Only configuration differs.
 
@@ -64,37 +70,37 @@ The same code runs unchanged across all combinations. Only configuration differs
 ## Architecture
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│                          PLC (any vendor)                            │
-│   Siemens S7-1500 · Beckhoff TwinCAT · Rockwell · OPC UA servers     │
-└────────────────────────────────┬─────────────────────────────────────┘
-                                 │
++----------------------------------------------------------------------+
+|                          PLC (any vendor)                            |
+|   Siemens S7-1500 - Beckhoff TwinCAT - Rockwell - OPC UA servers     |
++--------------------------------+-------------------------------------+
+                                 |
                        one of three transports
-                                 │
-        ┌────────────────────────┼──────────────────────────┐
-        │                        │                          │
-   tcp_json                 opcua                     plc_api
- (Windows server)      (native OPC UA)         (PLCSIM direct)
-        │                        │                          │
-        └────────────────────────┼──────────────────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │  linux/plc_ros_bridge.py│
-                    │  (+ plc_drivers.py)     │
-                    │  (+ plc_config.py)      │
-                    └────────────┬────────────┘
-                                 │
+                                 |
+        +------------------------+--------------------------+
+        |                        |                          |
+   tcp_json                    opcua                     plc_api
+ (Windows server)           (native OPC UA)         (PLCSIM direct)
+        |                        |                          |
+        +------------------------+--------------------------+
+                                 |
+                    +------------v------------+
+                    |  linux/plc_ros_bridge.py|
+                    |  (+ plc_drivers.py)     |
+                    |  (+ plc_config.py)      |
+                    +------------+------------+
+                                 |
                             ROS 2 topics
-                                 │
-                    ┌────────────▼────────────┐
-                    │   linux/krc_twin.py     │
-                    │  (Ruckig + state machine)│
-                    └────────────┬────────────┘
-                                 │
-                    ┌────────────▼────────────┐
-                    │  isaac/physics_twin.py  │
-                    │  (inside Isaac Sim)     │
-                    └─────────────────────────┘
+                                 |
+                    +------------v------------+
+                    |   linux/krc_twin.py     |
+                    | (Ruckig + state machine)|
+                    +------------+------------+
+                                 |
+                    +------------v------------+
+                    |  isaac/physics_twin.py  |
+                    |  (inside Isaac Sim)     |
+                    +-------------------------+
 ```
 
 ---
@@ -103,55 +109,59 @@ The same code runs unchanged across all combinations. Only configuration differs
 
 ```text
 vendor-neutral/
-│
-├── README.md                         # This file
-├── CHANGELOG.md                      # Gen 3 history
-│
-├── windows/
-│   └── plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
-│
-├── linux/
-│   ├── krc_twin.py                   # Ruckig trajectory + state machine
-│   ├── plc_ros_bridge.py             # ROS 2 <-> PLC bridge
-│   ├── plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
-│   └── plc_config.py                 # signal mapping + extractor
-│
-├── isaac/
-│   ├── physics_twin.py               # Articulation driver
-│   ├── Main_Robot_L_URDF_tool.urdf
-│   └── Full_Control.usd
-│
-├── config/
-│   └── plc_ros_bridge.yaml           # Signal mapping
-│
-├── tools/
-│   ├── latency_simpel.py             # Quick latency check
-│   ├── latency_academic.py           # LBP / p99.9 / jitter
-│   ├── srv.py                        # Clock responder
-│   ├── cli.py                        # Clock drift client
-│   └── info.txt
-│
-├── plc/
-│   ├── SCL_heartbeat_OB30.txt
-│   ├── SCL_MAIN.txt
-│   ├── SCL_heartbeat_OB30-init.txt
-│   ├── SCL_MAIN-init.txt
-│   └── DB.txt
-│
-└── docs/
-    └── migration.md
+|
++-- README.md                         # This file
++-- CHANGELOG.md                      # Gen 3 history
+|
++-- windows/
+|   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
+|
++-- linux/
+|   +-- krc_twin.py                   # Ruckig trajectory + state machine
+|   +-- plc_ros_bridge.py             # ROS 2 <-> PLC bridge
+|   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
+|   +-- plc_config.py                 # signal mapping + extractor
+|
++-- isaac/
+|   +-- physics_twin.py               # Articulation driver
+|   +-- Main_Robot_L_URDF_tool.urdf
+|   +-- Full_Control.usd
+|
++-- config/
+|   +-- plc_ros_bridge.yaml           # Signal mapping
+|
++-- tools/
+|   +-- latency_simpel.py             # Quick latency check
+|   +-- latency_academic.py           # LBP / p99.9 / jitter
+|   +-- latency_full_loop.py          # Full-loop L1+L2+L3+L4
+|   +-- compare_results.py            # A/B comparison tool
+|   +-- srv.py                        # Clock responder
+|   +-- cli.py                        # Clock drift client
+|   +-- info.txt
+|
++-- plc/
+|   +-- SCL_heartbeat_OB30.txt
+|   +-- SCL_MAIN.txt
+|   +-- SCL_heartbeat_OB30-init.txt
+|   +-- SCL_MAIN-init.txt
+|   +-- DB.txt
+|
++-- docs/
+    +-- migration.md
+    +-- latency_comparison.md         # Full comparison report
+    +-- latency_full_loop_OPC-UA.md   # Baseline report
 ```
 
 ---
 
 ## Supported Combinations
 
-| PLC | Transport | Robot | Status |
-| :--- | :--- | :--- | :--- |
-| Siemens S7-1500 (PLCSIM Adv.) | `plc_api` | KUKA KR210 | ✅ Verified |
-| Siemens S7-1500 (PLCSIM Adv.) | `tcp_json` | KUKA KR210 | ✅ Verified |
-| Any OPC UA server | `opcua` | Any robot in `robot.yaml` | ✅ Structural |
-| Siemens S7-1500 | `opcua` | Yaskawa GP110 | ✅ Structural |
+| PLC                           | Transport  | Robot                     | Mean Latency | Status     |
+| :---------------------------- | :--------- | :------------------------ | :----------: | :--------- |
+| Siemens S7-1500 (PLCSIM Adv.) | `plc_api`  | KUKA KR210                | TBD          | Verified   |
+| Siemens S7-1500 (PLCSIM Adv.) | `tcp_json` | KUKA KR210                | 5.2 ms       | Verified   |
+| Any OPC UA server             | `opcua`    | Any robot in `robot.yaml` | ~7 ms        | Structural |
+| Siemens S7-1500               | `opcua`    | Yaskawa GP110             | TBD          | Structural |
 
 **"Structural"** = code path exercised, imports work; full end-to-end verification on that combination is pending.
 
@@ -162,16 +172,20 @@ vendor-neutral/
 ### Prerequisites
 
 **Windows (only if using `tcp_json`):**
+
 - Python 3.x with `pythonnet`
 - PLCSIM Advanced V6.0
+- `pip install msgpack`
 
 **Linux (bridge + KRC twin):**
+
 - Ubuntu 22.04
 - ROS 2 Humble
 - Python 3.10
-- `pip install ruckig numpy pyyaml`
+- `pip install ruckig numpy pyyaml msgpack`
 
 **Isaac Sim host:**
+
 - Isaac Sim 4.x or 5.0
 - ROS 2 Bridge extension enabled
 
@@ -179,17 +193,17 @@ vendor-neutral/
 
 ```bash
 # 1. Windows: TCP/JSON server (only if driver: tcp_json)
-cd windows && python plc_server_win.py
+cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
 
 # 2. Isaac Sim Script Editor: physics twin
 #    Run: isaac/physics_twin.py
 
-# 3. Linux: PLC <-> ROS bridge
-cd linux
-python3 plc_ros_bridge.py --ros-args -p config:=../config/plc_ros_bridge.yaml
+# 3. Linux: PLC <-> ROS bridge (with CPU pinning for latency)
+taskset -c 2 python3 plc_ros_bridge.py \
+    --ros-args -p config:=../config/plc_ros_bridge.yaml
 
 # 4. Linux: KRC digital twin (trajectory generator)
-python3 krc_twin.py
+taskset -c 3 python3 krc_twin.py
 ```
 
 ### Switching Transport
@@ -198,7 +212,7 @@ Edit one line in `config/plc_ros_bridge.yaml`:
 
 ```yaml
 plc:
-  driver: opcua          # ← change to: tcp_json | opcua | plc_api
+  driver: opcua          # change to: tcp_json | opcua | plc_api
 ```
 
 Everything else stays the same.
@@ -249,79 +263,276 @@ Both files are validated at startup. If a signal referenced in the `robot` secti
 
 Measured on KUKA KR210 through `tcp_json`:
 
-| Joint | Setpoint | Actual | Error |
-| :--- | :--- | :--- | :--- |
-| **joint_1** | 30.0002° | 30.0002° | 0.0001° |
-| **joint_2** | -29.9603° | -29.9349° | 0.0254° |
-| **joint_3** | 60.0097° | 60.0133° | 0.0036° |
-| **joint_4** | -0.0025° | -0.0033° | 0.0008° |
-| **joint_5** | -0.4668° | -0.4668° | 0.0000° |
+| Joint       | Setpoint  | Actual    | Error   |
+| :---------- | :-------- | :-------- | :------ |
+| joint_1     | 30.0002°  | 30.0002°  | 0.0001° |
+| joint_2     | -29.9603° | -29.9349° | 0.0254° |
+| joint_3     | 60.0097°  | 60.0133°  | 0.0036° |
+| joint_4     | -0.0025°  | -0.0033°  | 0.0008° |
+| joint_5     | -0.4668°  | -0.4668°  | 0.0000° |
 
 Maximum error: **0.0254°** on `joint_2` under full gravity load.
 
 ### Control-Loop Latency
 
-Measured with `tools/latency_academic.py`:
+Measured with `tools/latency_full_loop.py` (L2 + L3, after TCP-JSON optimization).
 
-| Metric | Value |
-| :--- | :--- |
-| Mean | ~11.5 ms |
-| Std dev | ~1.3 ms |
-| p99.9 | ~14.3 ms |
-| LBP(≤ 15 ms) | 100% |
+#### Summary (3 independent runs)
 
-### Clock Drift (15-minute measurement)
+| Stage                       | Mean         | p95        | p99        | Max        |
+| :-------------------------- | :----------: | :--------: | :--------: | :--------: |
+| L1 — OPC UA/TCP read        | ~8 ms        | ~12 ms     | ~20 ms     | ~25 ms     |
+| L2 — ROS + Ruckig           | ~6.5 ms      | ~12 ms     | ~24 ms     | ~24 ms     |
+| L3 — Isaac physics          | ~3–13 ms     | ~16 ms     | ~17 ms     | ~17 ms     |
+| L4 — PLC write              | ~4.5 ms      | ~6 ms      | ~15 ms     | ~16 ms     |
+| **Full loop (L1+L2+L3+L4)** | **~15–25 ms**| **~40 ms** | **~55 ms** | **~80 ms** |
 
-| Metric | Value |
-| :--- | :--- |
-| Duration | 900 s |
-| Samples | 293,585 |
-| Packet Loss | 0.00% |
-| Drift | **-0.065 ppm** |
-| Standard Error | 0.00016 ppm |
-| Asymmetry Bound | ±16.0 µs |
+#### Comparison across transports
 
-Drift of -0.065 ppm = accumulated error < 0.25 ms per hour. This is 80× smaller than the PLC cycle time (20 ms).
+| Transport              | Mean       | Max        | Notes                           |
+| :--------------------- | :--------: | :--------: | :------------------------------ |
+| OPC UA (baseline)      | 11.5 ms    | 100 ms     | Original — tag-by-tag reads     |
+| TCP-JSON (baseline)    | 12.5 ms    | 233 ms     | Original — Windows GIL noise    |
+| TCP-JSON optimized     | 5.2 ms     | 16.3 ms    | Batch + msgpack + TCP_NODELAY   |
+
+#### Latency Bound Probability (LBP)
+
+| Threshold | LBP      |
+| :-------- | :------: |
+| <= 5 ms   | 46.9%    |
+| <= 10 ms  | 92.9%    |
+| <= 15 ms  | 98.3%    |
+| <= 20 ms  | 100%     |
+| <= 50 ms  | 100%     |
+
+**Result:** 100% of full-loop samples stay under 20 ms. This is well within the control cycle for medium-speed industrial applications.
+
+See `docs/latency_comparison.md` for the full report.
+
+### Clock Drift Calibration
+
+Two independent measurements were performed to characterize the clock behavior between Windows and Linux. The scope is **offset and drift between the two endpoints**, not the intrinsic oscillator accuracy of either machine.
+
+Both endpoints use the same clock kind (`perf_counter_ns`), so the comparison is homogeneous — no mixing of `raw` vs `mono` or `wall` vs `monotonic`.
+
+#### Physical machines (Windows 10 ↔ Ubuntu 24.04)
+
+**Setup:**
+
+| Item              | Value                                |
+| :---------------- | :----------------------------------- |
+| Client            | Windows 10, `DESKTOP-7RFMLG3`        |
+| Reference         | Ubuntu 24.04, `Nebras`, `tsc`        |
+| Peer address      | `111.111.111.2:9999`                 |
+| Duration          | 299.98 s (~5 minutes)                |
+| Samples           | 97,471 pings                         |
+
+**Main result:**
+
+| Metric                | Value             |
+| :-------------------- | :---------------- |
+| Packet loss           | 0.00 % (0/97,471) |
+| Drift (least squares) | **+95.73 ppm**    |
+| Drift (Theil-Sen)     | +95.81 ppm        |
+| Estimator agreement   | 0.082 ppm         |
+| Drift stability       | 1.99 ppm range    |
+| Quality               | ok (no warnings)  |
+
+**Interpretation:**
+
+- Linux clock runs **~95.7 ppm faster** than Windows
+- = **~5.74 ms per minute**
+- = **~0.344 s per hour**
+- = **~8.26 s per day**
+
+**Link quality:**
+
+| Metric  | Value     |
+| :------ | :-------- |
+| Min RTT | 0.166 ms  |
+| Median  | 0.598 ms  |
+| p95     | 0.848 ms  |
+| Max     | 1.436 ms  |
+
+The hard floor on offset error is `min_rtt / 2` = **±0.083 ms**.
+
+**Allan deviation:**
+
+| τ (s) | adev (ppm) | n   |
+| :---: | :--------: | :-- |
+| 1     | 58.22      | 298 |
+| 2     | 31.63      | 296 |
+| 4     | 15.17      | 292 |
+| 8     | 7.69       | 284 |
+| 16    | 4.12       | 268 |
+| 32    | 1.85       | 236 |
+| 64    | 0.92       | 172 |
+| 128   | 0.52       | 44  |
+
+Curve falls as `1/√τ` → white-noise behavior; clock is stable.
+
+**Correction model:**
+
+```
+offset(t) ≈ offset_at_t0 + drift × (t − t0)
+offset(t) ≈ 8,785,337.617 + 0.095728 × (t − t0)   [ms, t in seconds]
+
+local_time = peer_time − offset(t)
+```
+
+**Achievable correction accuracy:** **±0.1 ms** over 5 minutes.
+
+#### QEMU/KVM guest (Windows guest ↔ Ubuntu host)
+
+**Setup:**
+
+| Item              | Value                                |
+| :---------------- | :----------------------------------- |
+| Host              | Ubuntu 24.04, TSC clocksource        |
+| Guest             | Windows 10 in QEMU/KVM               |
+| Duration          | 756.7 s                              |
+| Samples           | 31,851 pings                         |
+
+**Main result:**
+
+| Metric              | Value             |
+| :------------------ | :---------------- |
+| Mean drift          | **≈ 80 ppm**      |
+| Min RTT             | 1.2 ms            |
+| Median RTT          | 2.0–2.5 ms        |
+| Max RTT             | 4–5 ms            |
+| Drift stability     | unstable (>20 ppm range) |
+
+**Interpretation:**
+
+This number is the *practical* timing error of a Windows guest in this VM configuration. It includes:
+
+- host TSC stability (good)
+- QEMU emulation overhead (dominant)
+- vCPU scheduling jitter
+- actual Windows clock drift
+
+It does **NOT** measure the intrinsic oscillator drift of the Windows machine's hardware.
+
+#### Comparison of both setups
+
+| Metric           | QEMU/KVM guest     | Physical machines       | Improvement |
+| :--------------- | :----------------: | :---------------------: | :---------: |
+| Min RTT          | 1.2 ms             | **0.166 ms**            | **7.2×**    |
+| Median RTT       | 2.0–2.5 ms         | 0.598 ms                | ~4×         |
+| Fitted drift     | ~80 ppm (variable) | **95.73 ppm (const.)**  | stable now  |
+| Drift range      | > 20 ppm           | **1.99 ppm**            | **> 10×**   |
+| Fit residual std | large              | 0.030 ms                | —           |
+| Quality          | check notes        | **ok**                  | OK          |
+
+#### Conclusions
+
+- The two physical machines drift at a constant rate of **+95.73 ppm**.
+- The Linux clock is consistently **ahead** of the Windows clock.
+- The link between physical machines is clean: **0% loss**, min RTT = **0.166 ms**.
+- The drift is stable (range **1.99 ppm** over 5 minutes).
+- A single linear correction is sufficient for sessions up to ~10 min.
+- For longer sessions, use `--track` and interpolate.
+- Achievable correction accuracy on physical machines: **±0.1 ms**.
+- For QEMU/KVM guests, the emulation overhead dominates — use physical machines for pure oscillator measurement.
+
+#### Recommendations
+
+1. Use the linear model in the physical-machines section for sessions ≤ 10 minutes.
+2. Switch to `--track` for sessions > 1 hour.
+3. Keep NTP/chrony disabled on both machines for pure measurement.
+4. Repeat the run 3 times at different times of day to confirm.
+5. Store the calibration coefficients with each experiment.
+6. For QEMU/KVM: enable `hypervclock`, disable `hpet`, pin vCPUs, then re-run.
+
+---
+
+## Performance Tuning
+
+The platform can be tuned for different latency/robustness trade-offs.
+
+### Quick Wins (no code changes)
+
+| Tuning             | Command                                        | Expected gain |
+| :----------------- | :--------------------------------------------- | :-----------: |
+| CPU pinning        | `taskset -c 2,3 python3 krc_twin.py`           | -2 to -3 ms   |
+| Real-time priority | `sudo chrt -f 80 python3 plc_ros_bridge.py`    | -2 ms         |
+| CycloneDDS         | `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` | -1 ms         |
+
+### Transport Tuning
+
+**TCP-JSON:**
+
+- Use msgpack framing (not JSON) — 3x faster serialization
+- Set TCP_NODELAY on both client and server sockets
+- Use asyncio on the Windows server (not threading)
+- Batch all reads/writes into a single request
+
+**OPC UA:**
+
+- Use `read_values(nodes)` instead of per-node `read_value()`
+- Consider OPC UA Subscriptions for change-based updates
+- Set TCP_NODELAY on the OPC UA client socket
+
+### Expected Performance
+
+| Transport             | Mean      | p99        | Max        |
+| :-------------------- | :-------: | :--------: | :--------: |
+| OPC UA (naive)        | 11.5 ms   | 14 ms      | 100 ms     |
+| OPC UA (batch)        | ~5 ms     | ~10 ms     | ~20 ms     |
+| TCP-JSON (naive)      | 12.5 ms   | 20 ms      | 233 ms     |
+| TCP-JSON (optimized)  | 5.2 ms    | 15.5 ms    | 16.3 ms    |
 
 ---
 
 ## Documentation
 
-| Document | Description |
-| :--- | :--- |
-| `docs/README_full.md` | Gen 3 full documentation |
-| `docs/migration.md` | How this folder was split from v2.0.0 |
-| `../CHANGELOG.md` | Version history (all generations) |
+| Document                            | Description                           |
+| :---------------------------------- | :------------------------------------ |
+| `docs/README_full.md`               | Gen 3 full documentation              |
+| `docs/migration.md`                 | How this folder was split from v2.0.0 |
+| `docs/latency_comparison.md`        | Full latency comparison report        |
+| `docs/latency_full_loop_OPC-UA.md`  | OPC UA baseline report                |
+| `../CHANGELOG.md`                   | Version history (all generations)     |
 
 ---
 
 ## Lineage
 
-| Version | Robot | Transport | Architecture | Location |
-| :--- | :--- | :--- | :--- | :--- |
-| v0.1.0 | KUKA KR210 | TCP/JSON | Monolithic | archived |
-| v1.0.0 | KUKA KR210 | TCP/JSON | 5 processes | `archive/v1.0-kuka/` |
-| v0.2.0 | Yaskawa GP110 | OPC UA | Monolithic bridge | `archive/v0.2-yaskawa/` |
-| v2.0.0 | Yaskawa GP110 | OPC UA | Modular (6 files) | `archive/v0.2-yaskawa/` |
-| **v3.0.0** | **Any robot** | **Any transport** | **Vendor-neutral** | **`vendor-neutral/`** |
+| Version | Robot         | Transport         | Architecture      | Location                |
+| :------ | :------------ | :---------------- | :---------------- | :---------------------- |
+| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic        | archived                |
+| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes       | `archive/v1.0-kuka/`    |
+| v0.2.0  | Yaskawa GP110 | OPC UA            | Monolithic bridge | `archive/v0.2-yaskawa/` |
+| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files) | `archive/v0.2-yaskawa/` |
+| v3.0.0  | Any robot     | Any transport     | Vendor-neutral    | `vendor-neutral/`       |
 
 ---
 
 ## Roadmap
 
 ### Completed
+
 - [x] Extract PLC transports into `plc_drivers.py`
 - [x] Extract signal handling into `plc_config.py`
 - [x] All three transports selectable from one YAML line
 - [x] Repository reorganized by environment (windows/linux/isaac/plc/tools)
 - [x] Latency + drift measurement tools preserved
+- [x] TCP-JSON optimization: batch reads + msgpack + TCP_NODELAY
+  - Mean latency: 12.5 ms -> 5.2 ms (-58%)
+  - Max latency: 233 ms -> 16.3 ms (-93%)
+  - Full-loop p99 under 20 ms in 100% of samples
+- [x] Latency characterization across OPC UA and TCP-JSON
+- [x] Clock drift characterization (physical + QEMU/KVM)
 
 ### In Progress
+
 - [ ] Move `krc_twin.py` inline config into `config/robot.yaml`
 - [ ] Unit tests for `plc_config` and `plc_drivers`
 - [ ] Yaskawa GP110 verification on this branch
 
 ### Planned
+
 - [ ] Cartesian motion layer (inverse kinematics)
 - [ ] Trajectory queue and blending
 - [ ] Certified safety layer (F-CPU + PROFIsafe)
@@ -337,10 +548,10 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Contact
 
-* **Developer:** Nebras — nebras4u@gmail.com
-* **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
-* **Location:** `vendor-neutral/`
+- **Developer:** Nebras — nebras4u@gmail.com
+- **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
+- **Location:** `vendor-neutral/`
 
-***
+---
 
-*Built for Industry 4.0 — GlassSync © 2026*
+*Built for Industry 4.0 — isaac-plc-digital-twin © 2026*

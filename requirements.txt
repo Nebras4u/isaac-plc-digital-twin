@@ -1,0 +1,103 @@
+# Isaac Digital Twin — Python Dependencies
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# Or for development:
+#   pip install -r requirements.txt
+#   pip install -r requirements-dev.txt   (see below)
+#
+# ─────────────────────────────────────────────────────────────────────────
+# Core dependencies (required for all installations)
+# ─────────────────────────────────────────────────────────────────────────
+
+# ROS 2 client library
+# Install via apt on Ubuntu 22.04:
+#   sudo apt install ros-humble-rclpy
+rclpy>=3.0.0
+
+# Trajectory generation
+ruckig>=0.9.0
+
+# Numerical computing
+numpy>=1.24.0,<2.0.0
+
+# YAML configuration parsing
+PyYAML>=6.0
+
+# Message serialization (optimized TCP-JSON)
+msgpack>=1.0.7
+
+# ─────────────────────────────────────────────────────────────────────────
+# OPC UA (only if using driver: opcua)
+# ─────────────────────────────────────────────────────────────────────────
+
+asyncua>=1.0.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# TCP-JSON server (Windows only, only if driver: tcp_json)
+# ─────────────────────────────────────────────────────────────────────────
+
+# PLCSIM Advanced API (Windows-only, requires Siemens installation)
+# pythonnet>=3.0.0
+# NOTE: pythonnet requires manual installation on Windows with:
+#       pip install pythonnet
+#       Do NOT include it in the general requirements.txt, as it will
+#       fail on Linux/macOS. Install manually if needed.
+
+# ─────────────────────────────────────────────────────────────────────────
+# Isaac Sim integration (only for isaac/physics_twin.py)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Isaac Sim ships its own Python environment. Do NOT install Isaac Sim
+# dependencies into the system Python. Instead, run physics_twin.py
+# inside Isaac Sim's Script Editor.
+#
+# Required extensions (enabled via Isaac Sim Extension Manager):
+#   - omni.isaac.ros2_bridge
+#   - omni.isaac.core
+#   - omni.isaac.articulation
+#
+# The following are auto-provided by Isaac Sim, do NOT install:
+#   - omni.kit.*
+#   - pxr (USD)
+#   - isaacsim.*
+#
+# ═══════════════════════════════════════════════════════════════════════════
+# Optional dependencies (for tools/ scripts)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Statistical analysis (for latency_academic.py)
+# statistics is in the Python standard library, no installation needed
+
+# Plotting (optional, for visualization)
+matplotlib>=3.7.0          # optional
+
+# CSV handling (standard library, no installation needed)
+# csv is in the Python standard library
+
+# ─────────────────────────────────────────────────────────────────────────
+# Development dependencies (install manually, see requirements-dev.txt)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# - pytest>=7.4.0
+# - pytest-cov>=4.1.0
+# - black>=23.0.0
+# - flake8>=6.0.0
+# - mypy>=1.5.0
+# - pre-commit>=3.4.0
+
+# ─────────────────────────────────────────────────────────────────────────
+# System requirements (not pip-installable)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# ROS 2 Humble:
+#   sudo apt install ros-humble-desktop
+#   source /opt/ros/humble/setup.bash
+#
+# Isaac Sim 5.0+:
+#   Install via NVIDIA Omniverse Launcher
+#
+# PLCSIM Advanced V6.0 (Windows only):
+#   Install via Siemens TIA Portal v17

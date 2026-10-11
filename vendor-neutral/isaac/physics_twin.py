@@ -1,11 +1,14 @@
 # physics_twin.py
-# Isaac Sim physics twin — KR210 articulation driver.
+# Isaac Sim physics executor — vendor-neutral.
+# Reads robot definition from robot.yaml.
 #
-# Subscribes: /servo_setpoints (JointState, radians)
-# Publishes:  /joint_states   (JointState, radians) @ 60 Hz
+# Gravity compensation: enabled via ArticulationView (Isaac Sim 5.1 built-in).
+# Falls back to set_joint_efforts if the API is not available.
 
 import asyncio
+import time
 import numpy as np
+import yaml
 import omni.kit.app
 import omni.usd
 import rclpy
@@ -16,38 +19,24 @@ from pxr import UsdPhysics
 
 
 # -------------------------------------------------------------------------
-# Robot configuration
+# Load robot definition
 # -------------------------------------------------------------------------
-ROBOT_PATH  = "/World/Main_Robot_L_URDF/base_link"
-ROBOT_SCOPE = "/World/Main_Robot_L_URDF"
+ROBOT_CFG_FILE = "/workspace/robot.yaml"
+with open(ROBOT_CFG_FILE) as f:
+    _cfg = yaml.safe_load(f)["robot"]
 
-DOF_ORDER = ["joint_1", "joint_2", "joint_3", "joint_5", "joint_4"]
-
+ROBOT_PATH  = _cfg["isaac_path"]
+ROBOT_SCOPE = _cfg["isaac_scope"]
+DOF_ORDER   = _cfg["all_joints"]
+DRIVES      = _cfg["drives"]
+JOINT_PATHS = {
+    k: v.replace("{scope}", ROBOT_SCOPE)
+    for k, v in _cfg["joint_paths"].items()
+}
 PUBLISH_HZ = 60.0
 
-
-# -------------------------------------------------------------------------
-# Prim paths for each joint
-# -------------------------------------------------------------------------
-JOINT_PATHS = {
-    "joint_1": f"{ROBOT_SCOPE}/base_link/joint_1",
-    "joint_2": f"{ROBOT_SCOPE}/link_1/joint_2",
-    "joint_3": f"{ROBOT_SCOPE}/link_2/joint_3",
-    "joint_4": f"{ROBOT_SCOPE}/link_4/joint_4",
-    "joint_5": f"{ROBOT_SCOPE}/link_3/joint_5",
-}
-
-
-# -------------------------------------------------------------------------
-# Drive gains
-# -------------------------------------------------------------------------
-DRIVES = {
-    "joint_1": {"stiffness": 1000000.0, "damping": 100000.0, "max_force": 50000000.0},
-    "joint_2": {"stiffness": 1000000.0, "damping": 100000.0, "max_force": 50000000.0},
-    "joint_3": {"stiffness": 1000000.0, "damping": 100000.0, "max_force": 50000000.0},
-    "joint_4": {"stiffness":  200000.0, "damping":  20000.0, "max_force":  5000000.0},
-    "joint_5": {"stiffness":  200000.0, "damping":  20000.0, "max_force":  5000000.0},
-}
+# Gravity compensation mode: "builtin" | "efforts" | "off"
+GRAVITY_MODE = "builtin"
 
 
 # -------------------------------------------------------------------------
@@ -92,28 +81,77 @@ def configure_drives():
               f"D={params['damping']:.0f} F={params['max_force']:.0f}")
 
 
+def enable_gravity_compensation(robot):
+    """Enable gravity compensation on the articulation.
+    Tries the built-in API first (no conflict with position control).
+    Falls back to the efforts API if needed."""
+
+    if GRAVITY_MODE == "off":
+        print("Gravity compensation: DISABLED by config")
+        return False
+
+    # --- Try built-in gravity compensation on the articulation view ---
+    if GRAVITY_MODE == "builtin":
+        for method_name in (
+            "set_gravity_compensation",
+            "set_gravity_compensation_enabled",
+        ):
+            try:
+                view = getattr(robot, "_articulation_view", None)
+                if view is None:
+                    continue
+                method = getattr(view, method_name, None)
+                if method is None:
+                    continue
+                method(True)
+                print(f"Gravity compensation: ENABLED (builtin: {method_name})")
+                return True
+            except Exception as e:
+                print(f"  [try] {method_name}: {e}")
+                continue
+
+    # --- Fallback: apply gravity forces via efforts every step ---
+    if GRAVITY_MODE in ("builtin", "efforts"):
+        try:
+            gravity = robot.get_dof_gravity_compensation_forces()
+            if gravity is not None:
+                print("Gravity compensation: ENABLED (efforts fallback)")
+                return "efforts"
+        except Exception as e:
+            print(f"  [try] efforts fallback: {e}")
+
+    print("Gravity compensation: NOT AVAILABLE")
+    return False
+
+
 # -------------------------------------------------------------------------
 # ROS node
 # -------------------------------------------------------------------------
 class PhysicsTwin(Node):
-    def __init__(self, robot):
+    def __init__(self, robot, gravity_status):
         super().__init__("physics_twin")
         self.robot = robot
+        self.gravity_status = gravity_status
         self.latest_setpoint = None
+        self._last_sp_t = 0.0
 
         self.create_subscription(
             JointState, "/servo_setpoints", self.on_setpoint, 10
         )
         self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
-        # no create_timer: we publish every frame from main loop
 
-        self.get_logger().info(f"Physics twin ready. DOF={DOF_ORDER}.")
+        self.get_logger().info(
+            f"PhysicsTwin ready. DOF={DOF_ORDER}. gravity={gravity_status}"
+        )
 
     def on_setpoint(self, msg: JointState):
         self.latest_setpoint = dict(zip(msg.name, msg.position))
+        self._last_sp_t = time.monotonic()
 
     def step(self):
         if self.latest_setpoint is None:
+            return
+        if (time.monotonic() - self._last_sp_t) > 0.5:
             return
 
         current = self.robot.get_joint_positions()
@@ -128,16 +166,28 @@ class PhysicsTwin(Node):
             else:
                 target[i] = float(current[i])
 
+        # 1) Position control
         self.robot.set_joint_position_targets(
             positions=target.reshape(1, -1),
             joint_indices=list(range(len(DOF_ORDER))),
         )
 
+        # 2) Gravity compensation (only if using "efforts" fallback)
+        if self.gravity_status == "efforts":
+            try:
+                gravity = self.robot.get_dof_gravity_compensation_forces()
+                if gravity is not None:
+                    self.robot.set_joint_efforts(
+                        efforts=gravity,
+                        joint_indices=list(range(len(DOF_ORDER))),
+                    )
+            except Exception:
+                pass
+
     def publish_states(self):
         pos = self.robot.get_joint_positions()
         if pos is None:
             return
-
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(DOF_ORDER)
@@ -171,12 +221,15 @@ async def main():
     if list(robot.dof_names) != DOF_ORDER:
         print("!!! WARNING: DOF order mismatch !!!")
 
-    node = PhysicsTwin(robot)
+    # Enable gravity compensation
+    gravity_status = enable_gravity_compensation(robot)
+
+    node = PhysicsTwin(robot, gravity_status)
     print("Entering main loop. Publishing /joint_states @ 60 Hz.")
 
     while True:
         node.step()
-        node.publish_states()          # publish every frame = 60 Hz
+        node.publish_states()
         try:
             rclpy.spin_once(node, timeout_sec=0.0)
         except Exception:
