@@ -548,9 +548,9 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Contact
 
+- **YouTube:** [@YourChannel]( [https://m.youtube.com/playlist?list=PLYLnoPt4fbu8]
 - **Developer:** Nebras — nebras4u@gmail.com
 - **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
-- **Location:** `vendor-neutral/`
 
 ---
 
