@@ -1,5 +1,6 @@
 # Isaac Digital Twin — Multi-Generation Platform
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312011.svg)](https://doi.org/10.5281/zenodo.23312011)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#latency-performance)
@@ -155,9 +156,35 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
 ---
 
+---
+
+## How to Cite
+
+If you use this software in academic work, please cite:
+
+```bibtex
+@software{damsarkho2026isaac,
+  author       = {Damsarkho, Nebras},
+  title        = {{Isaac Digital Twin — Vendor-Neutral Platform for
+                   PLC, ROS 2, and Isaac Sim}},
+  month        = oct,
+  year         = 2026,
+  publisher    = {Zenodo},
+  version      = {3.0.1},
+  doi          = {10.5281/zenodo.23312011},
+  url          = {https://doi.org/10.5281/zenodo.23312011}
+}
+```
+
+Or in plain text:
+
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.0.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
+
+---
+
 ## Contact
 
-- **YouTube:** [@YourChannel]( [https://m.youtube.com/playlist?list=PLYLnoPt4fbu8]
+- **YouTube:** [Digital Twin Series](https://www.youtube.com/playlist?list=PLYLnoPt4fbu8)
 - **Developer:** Nebras — nebras4u@gmail.com
 - **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
 
