@@ -3,10 +3,14 @@
 # Supports BOTH:
 #   - individual tags: "DB.Var[1]", "DB.Var[2]"
 #   - whole arrays:    "DB.Var"  (returns list)
+#
+# Every reply carries "seq" (monotonic per connection) and "ts" (unix time),
+# so the bridge can reject stale replies after a reconnect.
 
 import os
 import sys
 import json
+import time
 import socket
 import threading
 
@@ -44,14 +48,12 @@ print(f"Tag list updated. Total tags: {len(instance.TagInfos)}")
 # ---- Tag map ----
 DB = "MAIN_KUKA_KR210_L150_L"
 
-# Type aliases
 BOOL  = "Bool"
 LREAL = "LReal"
 DINT  = "DInt"
 INT   = "Int"
 
 TAGS = {
-    # ---- Robot commands (PLC → ROS) ----
     f"{DB}.MainRobotLeft_CmdAng[1]": LREAL,
     f"{DB}.MainRobotLeft_CmdAng[2]": LREAL,
     f"{DB}.MainRobotLeft_CmdAng[3]": LREAL,
@@ -59,7 +61,6 @@ TAGS = {
     f"{DB}.MainRobotLeft_CmdEnable": BOOL,
     f"{DB}.MainRobotLeft_Vlcty":     LREAL,
 
-    # ---- Robot status ----
     f"{DB}.MainRobotLeft_Emergency_Stop_Active": BOOL,
     f"{DB}.MainRobotLeft_Motion_Active":         BOOL,
     f"{DB}.MainRobotLeft_Group_Fault":           BOOL,
@@ -68,14 +69,12 @@ TAGS = {
     f"{DB}.MainRobotLeft_Axis3_Fault":           BOOL,
     f"{DB}.MainRobotLeft_Axis4_Fault":           BOOL,
 
-    # ---- Robot feedback (ROS → PLC) ----
     f"{DB}.MainRobotLeft_ActAng[1]": LREAL,
     f"{DB}.MainRobotLeft_ActAng[2]": LREAL,
     f"{DB}.MainRobotLeft_ActAng[3]": LREAL,
     f"{DB}.MainRobotLeft_ActAng[4]": LREAL,
     f"{DB}.MainRobotLeft_CmdAck":    BOOL,
 
-    # ---- Heartbeat protocol ----
     f"{DB}.Heartbeat_Counter": DINT,
     f"{DB}.ROS_Ack_Counter":   DINT,
     f"{DB}.ROS_Alive":         BOOL,
@@ -84,8 +83,6 @@ TAGS = {
     f"{DB}.Comm_LostCount":    DINT,
 }
 
-# ---- Array definitions (whole arrays) ----
-# name → (start_tag_template, element_type, count)
 ARRAYS = {
     f"{DB}.MainRobotLeft_CmdAng": (f"{DB}.MainRobotLeft_CmdAng[{{i}}]", LREAL, 4),
     f"{DB}.MainRobotLeft_ActAng": (f"{DB}.MainRobotLeft_ActAng[{{i}}]", LREAL, 4),
@@ -104,14 +101,13 @@ def _read_one(name, t):
 
 
 def _write_one(name, t, value):
-    if t == BOOL:  instance.WriteBool(name, bool(value))
+    if t == BOOL:    instance.WriteBool(name, bool(value))
     elif t == LREAL: instance.WriteDouble(name, float(value))
     elif t == DINT:  instance.WriteInt32(name, int(value))
     elif t == INT:   instance.WriteInt16(name, int(value))
 
 
 def read_tag(name):
-    # Case 1: array name
     if name in ARRAYS:
         tmpl, t, n = ARRAYS[name]
         out = []
@@ -121,19 +117,15 @@ def read_tag(name):
             except SimulationRuntimeException as e:
                 out.append(f"ERR:{e}")
         return out
-
-    # Case 2: individual tag
     if name in TAGS:
         try:
             return _read_one(name, TAGS[name])
         except SimulationRuntimeException as e:
             return f"ERR:{e}"
-
     return None
 
 
 def write_tag(name, value):
-    # Case 1: array name + list value
     if name in ARRAYS:
         tmpl, t, n = ARRAYS[name]
         if not isinstance(value, (list, tuple)):
@@ -150,8 +142,6 @@ def write_tag(name, value):
                 print(f"write_tag({name}[{i}]) failed: {e}")
                 ok = False
         return ok
-
-    # Case 2: individual tag
     if name in TAGS:
         try:
             _write_one(name, TAGS[name], value)
@@ -159,13 +149,13 @@ def write_tag(name, value):
         except SimulationRuntimeException as e:
             print(f"write_tag({name}) failed: {e}")
             return False
-
     return False
 
 
 def handle_client(conn, addr):
     print(f"[+] Client connected: {addr}")
     buf = b""
+    seq = 0
     try:
         while True:
             data = conn.recv(4096)
@@ -177,28 +167,40 @@ def handle_client(conn, addr):
                 try:
                     req = json.loads(line.decode("utf-8"))
                 except Exception as e:
-                    conn.sendall((json.dumps({"error": f"bad json: {e}"}) + "\n").encode())
+                    seq += 1
+                    conn.sendall((json.dumps({
+                        "error": f"bad json: {e}",
+                        "seq": seq, "ts": time.time(),
+                    }) + "\n").encode())
                     continue
 
                 cmd = req.get("cmd")
+                seq += 1
+                reply = None
+
                 if cmd == "read":
                     names = req.get("tags", list(TAGS.keys()) + list(ARRAYS.keys()))
                     result = {n: read_tag(n) for n in names}
-                    conn.sendall((json.dumps({"values": result}) + "\n").encode())
+                    reply = {"values": result}
 
                 elif cmd == "write":
                     writes = req.get("tags", {})
                     result = {n: write_tag(n, v) for n, v in writes.items()}
-                    conn.sendall((json.dumps({"written": result}) + "\n").encode())
+                    reply = {"written": result}
 
                 elif cmd == "list":
-                    conn.sendall((json.dumps({
+                    reply = {
                         "tags": list(TAGS.keys()),
                         "arrays": list(ARRAYS.keys()),
-                    }) + "\n").encode())
+                    }
 
                 else:
-                    conn.sendall((json.dumps({"error": f"unknown cmd: {cmd}"}) + "\n").encode())
+                    reply = {"error": f"unknown cmd: {cmd}"}
+
+                reply["seq"] = seq
+                reply["ts"] = time.time()
+                conn.sendall((json.dumps(reply) + "\n").encode())
+
     except Exception as e:
         print(f"[!] Client {addr} error: {e}")
     finally:
@@ -220,7 +222,9 @@ def main():
     try:
         while True:
             conn, addr = srv.accept()
-            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+            threading.Thread(
+                target=handle_client, args=(conn, addr), daemon=True
+            ).start()
     except KeyboardInterrupt:
         print("Shutting down.")
     finally:

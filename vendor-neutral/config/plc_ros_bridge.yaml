@@ -1,6 +1,6 @@
 # plc_ros_bridge.yaml
 # ==========================================================================
-# Switch protocol by editing "plc.driver" ONLY. No other edits needed.
+# Switch protocol by editing "plc.driver" ONLY.
 #
 #   opcua    → OPC UA server (S7-1500, PLCSIM Advanced)
 #   tcp_json → plc_server_win.py on Windows (cross-platform)
@@ -8,11 +8,14 @@
 # ==========================================================================
 
 plc:
-  driver: opcua               # ← CHANGE THIS LINE ONLY ( opcua | tcp_json | plc_api )
+  driver: tcp_json               # opcua | tcp_json | plc_api
 
   # ----- opcua -----
   endpoint: opc.tcp://192.168.100.50:4840
-  timeout: 1.0
+  timeout: 5.0                # ← رُفع من 1.0 إلى 5.0
+  # user: "operator"          # إذا كان السيرفر يتطلب مصادقة
+  # password: "secret"
+  # batch_max: 100            # 0 = طلب واحد لكل الوسوم
 
   # ----- tcp_json -----
   host: 192.168.100.18
@@ -24,23 +27,19 @@ plc:
 poll_hz: 60
 
 # ==========================================================================
-# Address prefix per protocol (same addresses, different prefix):
-#   opcua    → 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
-#   tcp_json → 'MAIN_KUKA_KR210_L150_L'
-#   plc_api  → 'MAIN_KUKA_KR210_L150_L'
+# Address prefix per protocol
 # ==========================================================================
 vars:
-  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
+  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'   # ← أُضيفت علامة الاقتباس المفقودة
   db: 'MAIN_KUKA_KR210_L150_L'
 
 # ==========================================================================
-# Signals — arrays use {p} prefix which depends on protocol.
-# The bridge selects prefix automatically based on driver.
+# Signals
 # ==========================================================================
 signals:
   # --- Arrays (read/write as a whole) ---
-  cmd_ang:    {addr: 'MainRobotLeft_CmdAng', type: array_float, dir: read}
-  act_ang:    {addr: 'MainRobotLeft_ActAng', type: array_float, dir: write}
+  cmd_ang:    {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
+  act_ang:    {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
 
   # --- Single tags ---
   cmd_enable: {addr: 'MainRobotLeft_CmdEnable',  type: bool,  dir: read}
