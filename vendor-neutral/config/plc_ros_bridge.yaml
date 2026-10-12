@@ -2,20 +2,19 @@
 # ==========================================================================
 # Switch protocol by editing "plc.driver" ONLY.
 #
-#   opcua    → OPC UA server (S7-1500, PLCSIM Advanced)
+#   opcua    → OPC UA server (S7-1500, PLCSIM Advanced, TwinCAT, ...)
 #   tcp_json → plc_server_win.py on Windows (cross-platform)
 #   plc_api  → direct PLCSIM Advanced API (Windows-only, fastest)
 # ==========================================================================
 
 plc:
-  driver: tcp_json               # opcua | tcp_json | plc_api
+  driver: opcua               # opcua | tcp_json | plc_api
 
   # ----- opcua -----
   endpoint: opc.tcp://192.168.100.50:4840
-  timeout: 5.0                # ← رُفع من 1.0 إلى 5.0
-  # user: "operator"          # إذا كان السيرفر يتطلب مصادقة
+  timeout: 5.0
+  # user: "operator"
   # password: "secret"
-  # batch_max: 100            # 0 = طلب واحد لكل الوسوم
 
   # ----- tcp_json -----
   host: 192.168.100.18
@@ -27,21 +26,32 @@ plc:
 poll_hz: 60
 
 # ==========================================================================
+# Structured logging
+# ==========================================================================
+logging:
+  level: INFO                # DEBUG | INFO | WARNING | ERROR
+  console: true              # print to stdout
+  to_ros: true               # forward to ROS 2 logger
+  file: /workspace/plc_bridge_logs/bridge.log
+  json_file: /workspace/plc_bridge_logs/bridge.jsonl
+  max_bytes: 10485760        # 10 MB per file
+  backup_count: 5            # keep 5 rotated files
+
+# ==========================================================================
 # Address prefix per protocol
 # ==========================================================================
 vars:
-  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'   # ← أُضيفت علامة الاقتباس المفقودة
+  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
   db: 'MAIN_KUKA_KR210_L150_L'
+  # For TwinCAT/Rockwell: use full Node IDs in signals instead.
 
 # ==========================================================================
 # Signals
 # ==========================================================================
 signals:
-  # --- Arrays (read/write as a whole) ---
   cmd_ang:    {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
   act_ang:    {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
 
-  # --- Single tags ---
   cmd_enable: {addr: 'MainRobotLeft_CmdEnable',  type: bool,  dir: read}
   velocity:   {addr: 'MainRobotLeft_Vlcty',      type: float, dir: read}
   estop:      {addr: 'MainRobotLeft_Emergency_Stop_Active', type: bool, dir: read}

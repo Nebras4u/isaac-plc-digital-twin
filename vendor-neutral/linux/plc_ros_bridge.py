@@ -16,10 +16,9 @@ Tested with asyncua 2.1.0 (read_values / write_values API).
 
 Address handling (OPC UA):
   - If a signal's addr starts with "ns=", it is treated as a complete
-    OPC UA Node ID and used as-is. This makes the bridge vendor-neutral:
-    use full Node IDs for TwinCAT, Rockwell, Mitsubishi, etc.
+    OPC UA Node ID and used as-is. This makes the bridge vendor-neutral.
   - Otherwise, the address is built from the YAML prefix using
-    `vars.opcua_addr_template` (default: '{ns}."{raw}"' for Siemens).
+    vars.opcua_addr_template (default: '{ns}."{raw}"' for Siemens).
 
 Run:
   python3 plc_ros_bridge.py --ros-args -p config:=plc_ros_bridge.yaml
@@ -36,6 +35,8 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Int32, String
+
+from bridge_logger import setup_logging
 
 try:
     from diagnostic_updater import Updater, FunctionDiagnosticTask
@@ -149,9 +150,6 @@ class OpcUaDriver(PlcDriver):
 
     Uses client.read_values / client.write_values, which are batched:
     one ReadRequest / WriteRequest per call, regardless of node count.
-
-    Vendor-neutral: full Node IDs (starting with 'ns=') are used as-is,
-    so the same bridge works with Siemens, TwinCAT, Rockwell, etc.
     """
 
     _YAML_TO_UA = None
@@ -163,7 +161,7 @@ class OpcUaDriver(PlcDriver):
         self.password = cfg.get("password")
         self.client = None
         self.nodes = {}
-        self.types = {}          # addr -> "bool"|"int"|"float"|"string"
+        self.types = {}
 
     def set_signal_types(self, types):
         self.types = dict(types)
@@ -195,7 +193,6 @@ class OpcUaDriver(PlcDriver):
             }
         return cls._YAML_TO_UA
 
-    # ---------------- read ----------------
     def read(self, addrs):
         addrs = list(addrs)
         if not addrs:
@@ -204,7 +201,6 @@ class OpcUaDriver(PlcDriver):
         try:
             values = self.client.read_values(nodes)
         except Exception:
-            # fallback per-node
             out = {}
             for a in addrs:
                 try:
@@ -216,14 +212,13 @@ class OpcUaDriver(PlcDriver):
         out = {}
         for a, v in zip(addrs, values):
             try:
-                if hasattr(v, "tolist"):   # numpy array
+                if hasattr(v, "tolist"):
                     v = v.tolist()
                 out[a] = v
             except Exception:
                 out[a] = None
         return out
 
-    # ---------------- write ----------------
     def _make_variant(self, addr, value):
         from asyncua import ua
         ua_type = self._yaml_to_ua()[self.types.get(addr, "float")]
@@ -255,7 +250,6 @@ class OpcUaDriver(PlcDriver):
                     if hasattr(st, "is_good") and not st.is_good():
                         failed.append(a)
             except Exception:
-                # fallback per-node
                 for a in ok_addrs:
                     try:
                         node = self._node(a)
@@ -389,6 +383,12 @@ class PlcRosBridge(Node):
 
         self._validate_config(cfg)
         self.cfg = cfg
+
+        # ---- structured logging ----
+        self.log = setup_logging(
+            cfg, logger_name="plc_ros_bridge", ros_logger=self.get_logger()
+        )
+
         driver_name = cfg["plc"]["driver"]
         self.driver_name = driver_name
         self.driver = DRIVERS[driver_name](cfg["plc"])
@@ -397,11 +397,9 @@ class PlcRosBridge(Node):
         vars_cfg = cfg.get("vars", {})
         ns = vars_cfg.get("ns", "")
         db = vars_cfg.get("db", "")
-        # template for opcua addr construction when addr is not a full Node ID
         opcua_tpl = vars_cfg.get("opcua_addr_template", '{ns}."{raw}"')
 
         def make_addr(raw):
-            # Full Node ID (TwinCAT, Rockwell, etc.) — use as-is
             if raw.startswith("ns="):
                 return raw
             if driver_name == "opcua":
@@ -420,7 +418,6 @@ class PlcRosBridge(Node):
             }
         self.read_names = [n for n, s in self.sig.items() if s["dir"] == "read"]
 
-        # pass addr -> type to OPC UA driver
         if hasattr(self.driver, "set_signal_types"):
             self.driver.set_signal_types({
                 s["addr"]: s["type"] for s in self.sig.values()
@@ -502,8 +499,9 @@ class PlcRosBridge(Node):
         self.create_timer(1.0 / poll_hz, self.tick)
         self.create_timer(0.5, self._check_watchdog)
 
-        self.get_logger().info(
-            f"plc_ros_bridge started (driver={driver_name}, poll_hz={poll_hz})"
+        self.log.info(
+            "bridge_started",
+            extra={"driver": driver_name, "poll_hz": poll_hz},
         )
 
     # ------------------------------------------------------------------
@@ -540,11 +538,17 @@ class PlcRosBridge(Node):
         if state == self.connected:
             return
         if state:
-            self.get_logger().info("PLC connected")
+            self.log.info(
+                "plc_connected",
+                extra={"driver": self.driver_name, "backoff_s": self._backoff},
+            )
         else:
-            self.get_logger().info("PLC disconnected")
+            self.log.warning(
+                "plc_disconnected",
+                extra={"driver": self.driver_name},
+            )
             self.pub_estop.publish(Bool(data=True))
-            self.get_logger().warn("PLC lost - estop published")
+            self.log.warning("plc_lost_estop_published")
         self.connected = state
         self.pub_conn.publish(Bool(data=state))
 
@@ -556,7 +560,10 @@ class PlcRosBridge(Node):
         try:
             self.driver.connect()
         except Exception as e:
-            self.get_logger().warn(f"PLC connect failed: {e}")
+            self.log.warning(
+                "plc_connect_failed",
+                extra={"error": str(e), "next_retry_in_s": self._backoff},
+            )
             self._set_connected(False)
             self._backoff = min(self._backoff * 2.0, self._backoff_max)
             return False
@@ -589,8 +596,14 @@ class PlcRosBridge(Node):
             last = self._warned.get(name, 0.0)
             if now - last > self._warn_cooldown:
                 self._warned[name] = now
-                self.get_logger().warn(
-                    f"signal '{name}' ({s['addr']}) = {v!r} -> {e}"
+                self.log.warning(
+                    "signal_bad_value",
+                    extra={
+                        "signal": name,
+                        "addr": s["addr"],
+                        "value": repr(v),
+                        "error": str(e),
+                    },
                 )
             return None
 
@@ -598,6 +611,7 @@ class PlcRosBridge(Node):
     def tick(self):
         if not self.connected and not self._try_connect():
             return
+        tick_id = int(time.time() * 1000) % 1000000
         t0 = time.time()
         try:
             raw = self.driver.read(
@@ -606,7 +620,10 @@ class PlcRosBridge(Node):
             vals = {n: self._get(n, raw) for n in self.read_names}
             read_ms = (time.time() - t0) * 1000.0
             if read_ms > 200.0:
-                self.get_logger().warn(f"slow read: {read_ms:.1f} ms")
+                self.log.warning(
+                    "slow_read",
+                    extra={"tick_id": tick_id, "read_ms": round(read_ms, 1)},
+                )
 
             self._last_tick_ok = time.time()
             self._publish(vals)
@@ -614,7 +631,6 @@ class PlcRosBridge(Node):
             writes = {}
             pending_ack = None
 
-            # heartbeat
             if self.hb_counter and self.hb_ack:
                 hb = vals.get(self.hb_counter)
                 if hb is not None:
@@ -625,7 +641,6 @@ class PlcRosBridge(Node):
                         writes[self.sig[self.hb_ack]["addr"]] = int(hb)
                         pending_ack = int(hb)
 
-            # feedback
             with self._js_lock:
                 if self.act_ang and self._js_ok:
                     if len(self.act_ang) == 1:
@@ -645,15 +660,32 @@ class PlcRosBridge(Node):
             if writes:
                 failed = self.driver.write(writes)
                 for a in failed:
-                    self.get_logger().warn(f"write failed: {a}")
+                    self.log.warning(
+                        "write_failed",
+                        extra={"tick_id": tick_id, "addr": a},
+                    )
                 if (
                     pending_ack is not None
                     and self.sig[self.hb_ack]["addr"] not in failed
                 ):
                     self._last_ack = pending_ack
 
+            self.log.debug(
+                "tick_ok",
+                extra={
+                    "tick_id": tick_id,
+                    "read_ms": round(read_ms, 2),
+                    "n_read": len(self.read_names),
+                    "n_write": len(writes),
+                },
+            )
+
         except Exception as e:
-            self.get_logger().error(f"PLC link error: {e}")
+            self.log.error(
+                "plc_link_error",
+                extra={"tick_id": tick_id, "error": str(e),
+                       "driver": self.driver_name},
+            )
             self.driver.close()
             self._set_connected(False)
 
@@ -676,23 +708,22 @@ class PlcRosBridge(Node):
             js = JointState()
             js.header.stamp = self.get_clock().now().to_msg()
             js.name = list(self.joints)
-            js.position = ang  # degrees (as in the old bridge)
+            js.position = ang
             self.pub_cmd_ang.publish(js)
 
     # ------------------------------------------------------------------
     def _check_watchdog(self):
         now = time.time()
         if self.connected and now - self._last_tick_ok > self._watchdog_timeout:
-            self.get_logger().error(
-                f"watchdog: tick stalled ({now - self._last_tick_ok:.2f}s)"
-            )
+            stalled = round(now - self._last_tick_ok, 2)
+            self.log.error("watchdog_tick_stalled",
+                           extra={"stalled_s": stalled})
             self.pub_estop.publish(Bool(data=True))
         if self.connected and self.hb_counter and self._last_hb_seen is not None:
             if now - self._last_hb_change > self._watchdog_timeout:
-                self.get_logger().error(
-                    f"watchdog: PLC heartbeat frozen "
-                    f"({now - self._last_hb_change:.2f}s)"
-                )
+                frozen = round(now - self._last_hb_change, 2)
+                self.log.error("watchdog_hb_frozen",
+                               extra={"frozen_s": frozen})
                 self.pub_estop.publish(Bool(data=True))
 
     # ------------------------------------------------------------------
@@ -713,6 +744,10 @@ class PlcRosBridge(Node):
     def destroy_node(self):
         try:
             self.driver.close()
+        except Exception:
+            pass
+        try:
+            self.log.info("bridge_shutdown")
         except Exception:
             pass
         super().destroy_node()
