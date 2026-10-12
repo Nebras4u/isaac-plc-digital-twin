@@ -26,9 +26,9 @@ robot:
 
   ruckig:
     control_hz: 60.0
-    max_vel:  3.0
-    max_acc: 10.0
-    max_jerk: 80.0
+    max_vel:  6.0
+    max_acc: 20.0
+    max_jerk: 400.0
     jump_threshold_rad: 0.30
 
   drives:
@@ -37,7 +37,7 @@ robot:
     joint_3: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
     joint_4: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}
     joint_5: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}
-    
+
   logging:
     level: INFO
     console: true
