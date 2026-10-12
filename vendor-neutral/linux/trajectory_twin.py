@@ -1,8 +1,12 @@
 # trajectory_twin.py
 # Vendor-neutral Ruckig-based trajectory generator.
 # Reads robot definition from robot.yaml.
+#
+# Logging: reuses bridge_logger.setup_logging for structured output
+# (human-readable + JSON Lines, with rotation).
 
 import math
+import os
 import threading
 import time
 
@@ -14,6 +18,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
 from ruckig import Ruckig, InputParameter, OutputParameter, Result, ControlInterface
+from bridge_logger import setup_logging
 
 IDLE, RUNNING, STOPPING = 0, 1, 2
 
@@ -109,6 +114,26 @@ class TrajectoryTwin(Node):
             r["max_jerk"], r["jump_threshold_rad"],
         )
 
+        # ---- structured logging ----
+        # Priority: cfg["logging"] if present, else a sane default
+        # writing next to the bridge logs.
+        log_cfg = {"logging": cfg.get("logging", {})} if "logging" in cfg else {
+            "logging": {
+                "level": "INFO",
+                "console": True,
+                "to_ros": True,
+                "file": "/workspace/plc_bridge_logs/trajectory.log",
+                "json_file": "/workspace/plc_bridge_logs/trajectory.jsonl",
+                "max_bytes": 10 * 1024 * 1024,
+                "backup_count": 5,
+            }
+        }
+        self.log = setup_logging(
+            log_cfg,
+            logger_name="trajectory_twin",
+            ros_logger=self.get_logger(),
+        )
+
         self.setpoint_pub = self.create_publisher(JointState, "/servo_setpoints", 10)
         self.lock = threading.Lock()
         self._actual = np.zeros(self.dof)
@@ -123,17 +148,30 @@ class TrajectoryTwin(Node):
         self._msg = JointState()
         self._msg.name = list(self.all_joints)
 
+        # ---- logging state (throttling) ----
+        self._last_setpoint_log = 0.0
+        self._cmd_timeout_logged = False
+        self._no_feedback_logged = False
+        self._estop_logged = False
+        self._last_cmd_logged = None
+
         self.create_subscription(JointState, "/joint_states", self.on_js, 10)
         self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, 10)
         self.create_subscription(Bool, "/plc/axis_enable", self.on_enable, 10)
         self.create_subscription(Bool, "/plc/emergency_stop", self.on_estop, 10)
         self.create_timer(1.0 / r["control_hz"], self.servo_tick)
 
-        self.get_logger().info(
-            f"TrajectoryTwin ready | robot={self.robot_name} | dof={self.dof} | "
-            f"controlled={self.controlled_joints} | rate={r['control_hz']} Hz"
+        self.log.info(
+            "twin_started",
+            extra={
+                "robot": self.robot_name,
+                "dof": self.dof,
+                "controlled": self.controlled_joints,
+                "rate_hz": r["control_hz"],
+            },
         )
 
+    # ------------------------------------------------------------------
     def on_js(self, msg):
         with self.lock:
             for n, p in zip(msg.name, msg.position):
@@ -146,15 +184,34 @@ class TrajectoryTwin(Node):
         n = len(self.controlled_joints)
         with self.lock:
             if len(msg.position) >= n:
-                self._cmd_deg = [float(x) for x in msg.position[:n]]
+                new_cmd = [float(x) for x in msg.position[:n]]
+                # log only on change to avoid flooding at 60 Hz
+                if new_cmd != self._last_cmd_logged:
+                    self._last_cmd_logged = list(new_cmd)
+                    self.log.info(
+                        "cmd_received",
+                        extra={"cmd_deg": new_cmd},
+                    )
+                self._cmd_deg = new_cmd
                 self._cmd_ok = True
                 self._last_cmd_t = time.monotonic()
 
     def on_enable(self, msg):
-        with self.lock: self._enable = bool(msg.data)
+        with self.lock:
+            new = bool(msg.data)
+            if new != self._enable:
+                self.log.info("enable_changed", extra={"enable": new})
+            self._enable = new
 
     def on_estop(self, msg):
-        with self.lock: self._estop = bool(msg.data)
+        with self.lock:
+            new = bool(msg.data)
+            if new != self._estop:
+                if new:
+                    self.log.error("estop_active")
+                else:
+                    self.log.info("estop_cleared")
+            self._estop = new
 
     def get_feedback(self):
         with self.lock:
@@ -177,45 +234,102 @@ class TrajectoryTwin(Node):
             cmd, cmd_ok = list(self._cmd_deg), self._cmd_ok
             last_cmd_t = self._last_cmd_t
         fresh, actual = self.get_feedback()
-        # watchdog: cmd_ang must arrive within 0.5 s
+
+        # ---- watchdog: cmd_ang must arrive within 0.5 s ----
         if (time.monotonic() - last_cmd_t) > 0.5:
+            if cmd_ok and not self._cmd_timeout_logged:
+                self.log.warning(
+                    "cmd_timeout",
+                    extra={"last_cmd_age_s": round(time.monotonic() - last_cmd_t, 2)},
+                )
+                self._cmd_timeout_logged = True
             cmd_ok = False
+        else:
+            self._cmd_timeout_logged = False
+
+        # ---- no feedback watchdog ----
+        if not fresh and self._has_actual:
+            if not self._no_feedback_logged:
+                self.log.error(
+                    "no_feedback",
+                    extra={"last_js_age_s": round(time.monotonic() - self._last_js_t, 2)},
+                )
+                self._no_feedback_logged = True
+        else:
+            self._no_feedback_logged = False
+
         want_run = enable and (not estop) and fresh and cmd_ok
 
         if want_run:
             if self._state != RUNNING:
                 self.planner.reset(actual)
+                self.log.info("state_changed",
+                              extra={"from": "IDLE", "to": "RUNNING"})
                 self._state = RUNNING
-                self.get_logger().info("→ RUNNING")
             target = self.build_target(cmd, actual)
             if target is None:
+                self.log.warning(
+                    "bad_command",
+                    extra={
+                        "cmd_deg": cmd,
+                        "limits": {j: self.limits_deg[j]
+                                   for j in self.controlled_joints},
+                    },
+                )
                 self._begin_brake("bad command")
             elif not self.planner.set_target(target):
+                self.log.warning("invalid_target",
+                                 extra={"target_rad": target.tolist()})
                 self._begin_brake("invalid target")
             else:
                 self.planner.sync_state(actual)
                 sp = self.planner.step()
                 if sp is not None: self.publish(sp)
         elif self._state == RUNNING:
-            self._begin_brake("fault or disable")
+            reason = "fault or disable"
+            if estop: reason = "estop"
+            elif not enable: reason = "disable"
+            elif not fresh: reason = "no feedback"
+            elif not cmd_ok: reason = "cmd timeout"
+            self._begin_brake(reason)
 
         if self._state == STOPPING:
             sp = self.planner.step()
             if sp is not None: self.publish(sp)
             if self.planner.stopped:
+                self.log.info("state_changed",
+                              extra={"from": "STOPPING", "to": "IDLE"})
                 self._state = IDLE
-                self.get_logger().info("→ IDLE")
 
     def publish(self, positions):
         self._msg.header.stamp = self.get_clock().now().to_msg()
         self._msg.position = positions.tolist()
         self.setpoint_pub.publish(self._msg)
 
+        # throttled sample at 1 Hz
+        now = time.monotonic()
+        if now - self._last_setpoint_log >= 1.0:
+            self._last_setpoint_log = now
+            self.log.info(
+                "setpoint_sample",
+                extra={"position_rad": positions.tolist()},
+            )
+
     def _begin_brake(self, reason):
         if self._state == RUNNING:
-            self.get_logger().warn(f"→ STOPPING ({reason})")
+            self.log.warning(
+                "state_changed",
+                extra={"from": "RUNNING", "to": "STOPPING", "reason": reason},
+            )
         self.planner.start_brake()
         self._state = STOPPING
+
+    def destroy_node(self):
+        try:
+            self.log.info("twin_shutdown")
+        except Exception:
+            pass
+        super().destroy_node()
 
 
 def main():
