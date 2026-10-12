@@ -14,6 +14,13 @@ Driver contract:
 
 Tested with asyncua 2.1.0 (read_values / write_values API).
 
+Address handling (OPC UA):
+  - If a signal's addr starts with "ns=", it is treated as a complete
+    OPC UA Node ID and used as-is. This makes the bridge vendor-neutral:
+    use full Node IDs for TwinCAT, Rockwell, Mitsubishi, etc.
+  - Otherwise, the address is built from the YAML prefix using
+    `vars.opcua_addr_template` (default: '{ns}."{raw}"' for Siemens).
+
 Run:
   python3 plc_ros_bridge.py --ros-args -p config:=plc_ros_bridge.yaml
 """
@@ -142,6 +149,9 @@ class OpcUaDriver(PlcDriver):
 
     Uses client.read_values / client.write_values, which are batched:
     one ReadRequest / WriteRequest per call, regardless of node count.
+
+    Vendor-neutral: full Node IDs (starting with 'ns=') are used as-is,
+    so the same bridge works with Siemens, TwinCAT, Rockwell, etc.
     """
 
     _YAML_TO_UA = None
@@ -383,15 +393,19 @@ class PlcRosBridge(Node):
         self.driver_name = driver_name
         self.driver = DRIVERS[driver_name](cfg["plc"])
 
-        # ---- address prefix per protocol ----
-        ns = cfg.get("vars", {}).get("ns", "")
-        db = cfg.get("vars", {}).get("db", "")
+        # ---- address prefix / template per protocol ----
+        vars_cfg = cfg.get("vars", {})
+        ns = vars_cfg.get("ns", "")
+        db = vars_cfg.get("db", "")
+        # template for opcua addr construction when addr is not a full Node ID
+        opcua_tpl = vars_cfg.get("opcua_addr_template", '{ns}."{raw}"')
 
         def make_addr(raw):
+            # Full Node ID (TwinCAT, Rockwell, etc.) — use as-is
             if raw.startswith("ns="):
                 return raw
             if driver_name == "opcua":
-                return f'{ns}."{raw}"'
+                return opcua_tpl.format(ns=ns, raw=raw)
             else:
                 return f'{db}.{raw}'
 
