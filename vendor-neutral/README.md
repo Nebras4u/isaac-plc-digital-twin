@@ -15,8 +15,26 @@ This folder (`vendor-neutral/`) is the evolution of two robot-specific implement
 
 ---
 
+## Safety Notice
+
+> **This project is a simulation / digital-twin research platform. It is
+> NOT a certified safety function and must not be used to protect people
+> or physical machinery.**
+
+- The e-stop, heartbeat, and watchdog logic (bridge, trajectory twin, PLC
+  counters) is **functional monitoring** that stops the *simulated* robot.
+  It is not designed, validated, or certified according to IEC 61508,
+  ISO 13849-1, or IEC 62061.
+- `tcp_json`, OPC UA, and ROS 2 links carry no safety-rated integrity
+  (no black channel, no safety protocol).
+- A real installation needs an independent certified safety layer (for
+  example an F-CPU with PROFIsafe and hardware E-Stop circuits).
+
+---
+
 ## Table of Contents
 
+- [Safety Notice](#safety-notice)
 - [Motivation](#motivation)
 - [What "Vendor-Neutral" Means](#what-vendor-neutral-means)
 - [Architecture](#architecture)
@@ -51,7 +69,7 @@ Three abstractions make this possible:
 2. **Signal abstraction** — `plc_config.py` handles address mapping and value extraction, decoupled from any specific PLC protocol.
 3. **Robot abstraction** — a single `robot.yaml` describes joints, limits, drives, and Isaac paths for any robot.
 
-The main nodes (`krc_twin.py`, `plc_ros_bridge.py`, `physics_twin.py`) stay focused on their responsibility and delegate these concerns to the modules above.
+The main nodes (`trajectory_twin.py`, `plc_ros_bridge.py`, `physics_twin.py`) stay focused on their responsibility and delegate these concerns to the modules above.
 
 ---
 
@@ -93,7 +111,7 @@ The same code runs unchanged across all combinations. Only configuration differs
                             ROS 2 topics
                                  |
                     +------------v------------+
-                    |   linux/krc_twin.py     |
+                    |linux/trajectory_twin.py |
                     | (Ruckig + state machine)|
                     +------------+------------+
                                  |
@@ -117,7 +135,7 @@ vendor-neutral/
 |   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
 |
 +-- linux/
-|   +-- krc_twin.py                   # Ruckig trajectory + state machine
+|   +-- trajectory_twin.py            # Ruckig trajectory + state machine
 |   +-- plc_ros_bridge.py             # ROS 2 <-> PLC bridge
 |   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
 |   +-- plc_config.py                 # signal mapping + extractor
@@ -129,6 +147,7 @@ vendor-neutral/
 |
 +-- config/
 |   +-- plc_ros_bridge.yaml           # Signal mapping
+|   +-- robot.yaml                    # Joints, limits, Ruckig, drives
 |
 +-- tools/
 |   +-- latency_simpel.py             # Quick latency check
@@ -177,7 +196,7 @@ vendor-neutral/
 - PLCSIM Advanced V6.0
 - `pip install msgpack`
 
-**Linux (bridge + KRC twin):**
+**Linux (bridge + trajectory twin):**
 
 - Ubuntu 22.04
 - ROS 2 Humble
@@ -202,8 +221,9 @@ cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
 taskset -c 2 python3 plc_ros_bridge.py \
     --ros-args -p config:=../config/plc_ros_bridge.yaml
 
-# 4. Linux: KRC digital twin (trajectory generator)
-taskset -c 3 python3 krc_twin.py
+# 4. Linux: trajectory twin (Ruckig trajectory generator)
+taskset -c 3 python3 trajectory_twin.py \
+    --ros-args -p robot:=../config/robot.yaml
 ```
 
 ### Switching Transport
@@ -234,26 +254,52 @@ python3 -m pytest ../tests -v
 
 ```yaml
 plc:
-  driver: tcp_json       # tcp_json | opcua | plc_api
-  host: 192.168.100.18
+  driver: opcua          # opcua | tcp_json | plc_api
+  endpoint: opc.tcp://192.168.100.50:4840   # opcua
+  timeout: 0.5
+  host: 192.168.100.18                      # tcp_json
   port: 5000
-  timeout: 0.015
+
+poll_hz: 60
 
 vars:
-  db: MAIN_KUKA_KR210_L150_L
+  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
+  db: 'MAIN_KUKA_KR210_L150_L'
 
 signals:
-  cmd_ang_1:  {addr: "{db}.MainRobotLeft_CmdAng[1]", type: float, dir: read}
+  cmd_ang: {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
+  act_ang: {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
+  estop:   {addr: 'MainRobotLeft_Emergency_Stop_Active', type: bool, dir: read}
   ...
+
+publish:
+  - {topic: /plc/emergency_stop, signal: estop, type: bool}
+  ...
+
+heartbeat:
+  counter: hb_counter
+  ack: ros_ack_counter
 
 robot:
   joints:  [joint_1, joint_2, joint_3, joint_4]
-  cmd_ang: [cmd_ang_1, cmd_ang_2, cmd_ang_3, cmd_ang_4]
-  act_ang: [act_ang_1, act_ang_2, act_ang_3, act_ang_4]
+  cmd_ang: [cmd_ang]     # one array signal (all joints)
+  act_ang: [act_ang]
   cmd_ack: cmd_ack
 ```
 
-Both files are validated at startup. If a signal referenced in the `robot` section is missing from `signals`, the bridge refuses to start.
+If a signal referenced in the `robot`, `publish`, or `heartbeat` sections is
+missing from `signals`, the bridge refuses to start.
+
+If `/plc/emergency_stop` is published from a PLC signal (as above), the
+bridge takes the e-stop state from the PLC after a reconnect. Without that
+signal it clears the e-stop on reconnect.
+
+### `config/robot.yaml` — Robot description
+
+Used by `trajectory_twin.py` (and the Isaac physics twin): joints, limits
+(`limits_deg`), Ruckig limits (`ruckig`), drive gains, and Isaac prim paths.
+`all_joints` includes the passive joint (`joint_5`); `controlled_joints` are
+the axes commanded by the PLC.
 
 ---
 
@@ -272,6 +318,8 @@ Measured on KUKA KR210 through `tcp_json`:
 | joint_5     | -0.4668°  | -0.4668°  | 0.0000° |
 
 Maximum error: **0.0254°** on `joint_2` under full gravity load.
+
+*Note: `joint_5` is passive. Its setpoint is taken from the measured position, so its 0.0000° error is zero by construction and is not a tracking result.*
 
 ### Control-Loop Latency
 
@@ -455,7 +503,7 @@ The platform can be tuned for different latency/robustness trade-offs.
 
 | Tuning             | Command                                        | Expected gain |
 | :----------------- | :--------------------------------------------- | :-----------: |
-| CPU pinning        | `taskset -c 2,3 python3 krc_twin.py`           | -2 to -3 ms   |
+| CPU pinning        | `taskset -c 2,3 python3 trajectory_twin.py`      | -2 to -3 ms   |
 | Real-time priority | `sudo chrt -f 80 python3 plc_ros_bridge.py`    | -2 ms         |
 | CycloneDDS         | `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` | -1 ms         |
 
@@ -523,11 +571,13 @@ The platform can be tuned for different latency/robustness trade-offs.
   - Max latency: 233 ms -> 16.3 ms (-93%)
   - Full-loop p99 under 20 ms in 100% of samples
 - [x] Latency characterization across OPC UA and TCP-JSON
+- [x] `trajectory_twin.py` reads joints, limits, and Ruckig parameters from `config/robot.yaml`
+- [x] Fix: a persistent bad command no longer cancels an in-progress brake
+- [x] Fix: bridge no longer auto-clears the e-stop on PLC reconnect
 - [x] Clock drift characterization (physical + QEMU/KVM)
 
 ### In Progress
 
-- [ ] Move `krc_twin.py` inline config into `config/robot.yaml`
 - [ ] Unit tests for `plc_config` and `plc_drivers`
 - [ ] Yaskawa GP110 verification on this branch
 
@@ -535,7 +585,7 @@ The platform can be tuned for different latency/robustness trade-offs.
 
 - [ ] Cartesian motion layer (inverse kinematics)
 - [ ] Trajectory queue and blending
-- [ ] Certified safety layer (F-CPU + PROFIsafe)
+- [ ] Certified safety layer (F-CPU + PROFIsafe) — postponed; see Safety Notice
 - [ ] Native OPC UA on Windows (remove PLC server dependency)
 
 ---
@@ -548,7 +598,7 @@ MIT License. See [LICENSE](LICENSE).
 
 ## Contact
 
-- **YouTube:** [@YourChannel]( [https://m.youtube.com/playlist?list=PLYLnoPt4fbu8]
+- **YouTube:** [Digital Twin Series](https://www.youtube.com/playlist?list=PLYLnoPt4fbu8)
 - **Developer:** Nebras — nebras4u@gmail.com
 - **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
 

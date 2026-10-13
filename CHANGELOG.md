@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Changed
+
+- `krc_twin.py` replaced by `trajectory_twin.py` — a vendor-neutral Ruckig
+  trajectory generator and state machine that reads joints, limits, and
+  Ruckig parameters from `config/robot.yaml` (closes **VL-01**).
+- README Quick Start updated: `trajectory_twin.py --ros-args -p robot:=...`.
+
+### Fixed
+
+- **`trajectory_twin.py` — brake cancelled by a persistent bad command.**
+  With a command that stayed out of limits, the state machine re-entered
+  `RUNNING` from `STOPPING` on the next cycle and called `planner.reset()`,
+  cancelling the brake profile (abrupt stop) and logging `bad_command` plus
+  two `state_changed` lines every cycle. Now `RUNNING` can only be entered
+  from `IDLE`, a brake always runs to completion, a bad command in `IDLE`
+  keeps the twin idle, and `bad_command` is logged once.
+  Stub-based test (200 cycles with a bad command): 200 `bad_command` and
+  598 `state_changed` log lines before, 1 `bad_command` and 2
+  `state_changed` after.
+- **`plc_ros_bridge.py` — e-stop auto-cleared on reconnect.** The bridge
+  published `/plc/emergency_stop = False` immediately on reconnect, before
+  the real PLC e-stop value was read. When the PLC e-stop signal is
+  published (`/plc/emergency_stop` in `publish`), the value now comes from
+  the PLC on the next cycle. Configurations without that signal keep the
+  previous behavior.
+
+### Documentation
+
+- Added a **Safety Notice** to the README: the e-stop, heartbeat, and
+  watchdog logic is functional monitoring for the simulated robot and is
+  **not a certified safety function** (IEC 61508 / ISO 13849-1 /
+  IEC 62061). Real installations require an independent certified safety
+  layer (F-CPU with PROFIsafe, hardware E-Stop).
+
+### Known Limitations
+
+| ID | Limitation |
+| :--- | :--- |
+| VL-01 | ~~KRC twin reads config inline~~ — resolved by `trajectory_twin.py` |
+| VL-06 | Fixes above verified with stubbed ROS 2 / Ruckig only; not yet re-tested on Isaac Sim or PLCSIM Advanced |
+| VL-07 | No automated tests yet for the planner state machine (the stub test is the starting point) |
+
+---
+
 ## [3.0.0] — 2026-10-10 — Vendor-Neutral Platform
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3

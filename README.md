@@ -20,6 +20,25 @@ The repository hosts three generations of the platform, side by side:
 
 ---
 
+## Safety Notice
+
+> **This project is a simulation / digital-twin research platform. It is
+> NOT a certified safety function and must not be used to protect people
+> or physical machinery.**
+
+- The e-stop, heartbeat, and watchdog logic in this repository (bridge,
+  trajectory twin, PLC counters) is **functional monitoring** that stops
+  the *simulated* robot. It is not designed, validated, or certified
+  according to IEC 61508, ISO 13849-1, or IEC 62061.
+- Communication over `tcp_json`, OPC UA, or ROS 2 has no safety-rated
+  integrity (no black channel, no safety protocol).
+- Any real installation needs an independent, certified safety layer
+  (for example an F-CPU with PROFIsafe and hardware E-Stop circuits).
+  This is on the roadmap and deliberately postponed for the current
+  simulation-only stage.
+
+---
+
 ## Active Development: `vendor-neutral/`
 
 The current generation removes hard-coded coupling to any specific robot
@@ -31,13 +50,32 @@ Highlights:
 - 3 transports in one abstraction: `tcp_json`, `opcua`, `plc_api`
 - Robot description in `config/robot.yaml`
 - Signal mapping in `config/plc_ros_bridge.yaml`
-- Ruckig-based online trajectory generation
+- Ruckig-based online trajectory generation (`trajectory_twin.py`,
+  configured from `config/robot.yaml`)
+- Controlled braking on e-stop, heartbeat/feedback loss, or an
+  out-of-limits command (never an abrupt setpoint jump)
 - Counter-based heartbeat protocol
 - Sub-0.03° tracking accuracy verified
 - **Full-loop latency: 5.2 ms mean, 16.3 ms max** (TCP-JSON optimized)
 - **58% faster** than the original TCP-JSON baseline
 
 **See [`vendor-neutral/README.md`](vendor-neutral/README.md) for full docs.**
+
+---
+
+## Recent Changes
+
+See [`CHANGELOG.md`](CHANGELOG.md) (section *Unreleased*) for details.
+
+- `krc_twin.py` is replaced by the vendor-neutral `trajectory_twin.py`,
+  which reads joints, limits, and Ruckig parameters from `config/robot.yaml`.
+- **Fix:** a persistent out-of-limits command no longer cancels an
+  in-progress brake (the planner was reset every cycle, causing an abrupt
+  stop and about 3 log lines per cycle at 60 Hz).
+- **Fix:** on PLC reconnect, the bridge no longer publishes
+  `/plc/emergency_stop = False` before the real PLC e-stop value has been
+  read.
+- Added the Safety Notice above.
 
 ---
 
@@ -135,8 +173,9 @@ cd linux
 taskset -c 2 python3 plc_ros_bridge.py \
     --ros-args -p config:=../config/plc_ros_bridge.yaml
 
-# 4. Linux: KRC digital twin
-taskset -c 3 python3 krc_twin.py
+# 4. Linux: trajectory twin (Ruckig + state machine)
+taskset -c 3 python3 trajectory_twin.py \
+    --ros-args -p robot:=../config/robot.yaml
 ```
 
 Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
@@ -153,8 +192,6 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 | [`yaskawa/README.md`](yaskawa/docs/README.md)                                            | Gen 2 — Yaskawa GP110                      |
 | [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                            |
 | [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                    |
-
----
 
 ---
 

@@ -150,6 +150,19 @@ class OpcUaDriver(PlcDriver):
 
     Uses client.read_values / client.write_values, which are batched:
     one ReadRequest / WriteRequest per call, regardless of node count.
+
+    Reconnect strategy
+    ------------------
+    asyncua's sync wrapper caches the asyncio event loop per thread.
+    A hard disconnect (server stop) leaves that loop in a poisoned
+    state: the next ``Client(...).connect()`` re-uses the dead loop
+    and either raises immediately or hangs forever.
+
+    To recover, we fully tear down the underlying sync client on
+    ``close()`` (calling ``disconnect()``, dropping the cached loop
+    if the API exposes a reset) and rebuild a fresh ``Client`` on
+    every ``connect()``. All driver methods are guarded by a lock so
+    a reconnect from the rclpy timer thread can't race a read/write.
     """
 
     _YAML_TO_UA = None
@@ -162,25 +175,63 @@ class OpcUaDriver(PlcDriver):
         self.client = None
         self.nodes = {}
         self.types = {}
+        self._lock = threading.RLock()
 
     def set_signal_types(self, types):
         self.types = dict(types)
 
+    # -- connect / close --------------------------------------------------
     def connect(self):
         from asyncua.sync import Client
-        self.close()
-        self.client = Client(self.endpoint, timeout=self.timeout)
-        if self.user:
-            self.client.set_user(self.user)
-            self.client.set_password(self.password)
-        self.client.connect()
+        with self._lock:
+            self._close_locked()
+            self.client = Client(self.endpoint, timeout=self.timeout)
+            if self.user:
+                self.client.set_user(self.user)
+                self.client.set_password(self.password)
+            try:
+                self.client.connect()
+            except Exception:
+                try:
+                    self.client.disconnect()
+                except Exception:
+                    pass
+                self.client = None
+                raise
+            self.nodes.clear()
+
+    def _close_locked(self):
+        if self.client is not None:
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass
+            try:
+                from asyncua.sync import SyncClient
+                for attr in ("_reset_loop", "reset_loop"):
+                    fn = getattr(SyncClient, attr, None)
+                    if callable(fn):
+                        try:
+                            fn()
+                        except Exception:
+                            pass
+                        break
+            except Exception:
+                pass
+            self.client = None
         self.nodes.clear()
 
+    def close(self):
+        with self._lock:
+            self._close_locked()
+
+    # -- node cache -------------------------------------------------------
     def _node(self, addr):
         if addr not in self.nodes:
             self.nodes[addr] = self.client.get_node(addr)
         return self.nodes[addr]
 
+    # -- read -------------------------------------------------------------
     @classmethod
     def _yaml_to_ua(cls):
         if cls._YAML_TO_UA is None:
@@ -197,28 +248,32 @@ class OpcUaDriver(PlcDriver):
         addrs = list(addrs)
         if not addrs:
             return {}
-        nodes = [self._node(a) for a in addrs]
-        try:
-            values = self.client.read_values(nodes)
-        except Exception:
+        with self._lock:
+            if self.client is None:
+                raise ConnectionError("OPC UA client is not connected")
+            nodes = [self._node(a) for a in addrs]
+            try:
+                values = self.client.read_values(nodes)
+            except Exception:
+                out = {}
+                for a in addrs:
+                    try:
+                        out[a] = self._node(a).read_value()
+                    except Exception:
+                        out[a] = None
+                return out
+
             out = {}
-            for a in addrs:
+            for a, v in zip(addrs, values):
                 try:
-                    out[a] = self._node(a).read_value()
+                    if hasattr(v, "tolist"):
+                        v = v.tolist()
+                    out[a] = v
                 except Exception:
                     out[a] = None
             return out
 
-        out = {}
-        for a, v in zip(addrs, values):
-            try:
-                if hasattr(v, "tolist"):
-                    v = v.tolist()
-                out[a] = v
-            except Exception:
-                out[a] = None
-        return out
-
+    # -- write ------------------------------------------------------------
     def _make_variant(self, addr, value):
         from asyncua import ua
         ua_type = self._yaml_to_ua()[self.types.get(addr, "float")]
@@ -230,44 +285,39 @@ class OpcUaDriver(PlcDriver):
         from asyncua import ua
         if not values:
             return []
-        addrs = list(values.keys())
-        variants = []
-        ok_addrs = []
-        failed = []
-        for a in addrs:
-            try:
-                variants.append(self._make_variant(a, values[a]))
-                ok_addrs.append(a)
-            except Exception:
-                failed.append(a)
+        with self._lock:
+            if self.client is None:
+                raise ConnectionError("OPC UA client is not connected")
+            addrs = list(values.keys())
+            variants = []
+            ok_addrs = []
+            failed = []
+            for a in addrs:
+                try:
+                    variants.append(self._make_variant(a, values[a]))
+                    ok_addrs.append(a)
+                except Exception:
+                    failed.append(a)
 
-        if variants:
-            try:
-                statuses = self.client.write_values(
-                    [self._node(a) for a in ok_addrs], variants
-                )
-                for a, st in zip(ok_addrs, statuses):
-                    if hasattr(st, "is_good") and not st.is_good():
-                        failed.append(a)
-            except Exception:
-                for a in ok_addrs:
-                    try:
-                        node = self._node(a)
-                        node.write_value(
-                            ua.DataValue(self._make_variant(a, values[a]))
-                        )
-                    except Exception:
-                        failed.append(a)
+            if variants:
+                try:
+                    statuses = self.client.write_values(
+                        [self._node(a) for a in ok_addrs], variants
+                    )
+                    for a, st in zip(ok_addrs, statuses):
+                        if hasattr(st, "is_good") and not st.is_good():
+                            failed.append(a)
+                except Exception:
+                    for a in ok_addrs:
+                        try:
+                            node = self._node(a)
+                            node.write_value(
+                                ua.DataValue(self._make_variant(a, values[a]))
+                            )
+                        except Exception:
+                            failed.append(a)
 
-        return failed
-
-    def close(self):
-        try:
-            if self.client:
-                self.client.disconnect()
-        except Exception:
-            pass
-        self.client = None
+            return failed
 
 
 # --------------------------------------------------------------------------
@@ -451,6 +501,10 @@ class PlcRosBridge(Node):
         ]
         self.pub_conn  = self.create_publisher(Bool, "/plc/connected", 10)
         self.pub_estop = self.create_publisher(Bool, "/plc/emergency_stop", 10)
+        self._estop_from_plc = any(
+            p["topic"] == "/plc/emergency_stop" and p["type"] == "bool"
+            for p in cfg.get("publish", [])
+        )
         self.pub_cmd_ang = None
         if self.cmd_ang:
             self.pub_cmd_ang = self.create_publisher(
@@ -481,8 +535,6 @@ class PlcRosBridge(Node):
         # ---- watchdog ----
         self._watchdog_timeout = cfg.get("watchdog_timeout", 2.0)
         self._last_tick_ok = time.time()
-        self._last_hb_seen = None
-        self._last_hb_change = time.time()
 
         # ---- diagnostics ----
         self._diag_updater = None
@@ -538,10 +590,19 @@ class PlcRosBridge(Node):
         if state == self.connected:
             return
         if state:
+            self._last_tick_ok = time.time()
             self.log.info(
                 "plc_connected",
                 extra={"driver": self.driver_name, "backoff_s": self._backoff},
             )
+            if self._estop_from_plc:
+                # The real PLC estop value is published on the next tick;
+                # do not declare "cleared" before reading it.
+                self.log.info("plc_reconnected_estop_from_plc")
+            else:
+                # No PLC estop signal configured: fall back to clearing.
+                self.pub_estop.publish(Bool(data=False))
+                self.log.info("plc_reconnected_estop_cleared")
         else:
             self.log.warning(
                 "plc_disconnected",
@@ -633,13 +694,9 @@ class PlcRosBridge(Node):
 
             if self.hb_counter and self.hb_ack:
                 hb = vals.get(self.hb_counter)
-                if hb is not None:
-                    if self._last_hb_seen is None or hb != self._last_hb_seen:
-                        self._last_hb_seen = hb
-                        self._last_hb_change = time.time()
-                    if hb != self._last_ack:
-                        writes[self.sig[self.hb_ack]["addr"]] = int(hb)
-                        pending_ack = int(hb)
+                if hb is not None and hb != self._last_ack:
+                    writes[self.sig[self.hb_ack]["addr"]] = int(hb)
+                    pending_ack = int(hb)
 
             with self._js_lock:
                 if self.act_ang and self._js_ok:
@@ -688,6 +745,7 @@ class PlcRosBridge(Node):
             )
             self.driver.close()
             self._set_connected(False)
+            self._last_try = 0.0
 
     def _publish(self, vals):
         for p, pub in self.pubs:
@@ -719,12 +777,6 @@ class PlcRosBridge(Node):
             self.log.error("watchdog_tick_stalled",
                            extra={"stalled_s": stalled})
             self.pub_estop.publish(Bool(data=True))
-        if self.connected and self.hb_counter and self._last_hb_seen is not None:
-            if now - self._last_hb_change > self._watchdog_timeout:
-                frozen = round(now - self._last_hb_change, 2)
-                self.log.error("watchdog_hb_frozen",
-                               extra={"frozen_s": frozen})
-                self.pub_estop.publish(Bool(data=True))
 
     # ------------------------------------------------------------------
     def _diag(self, stat):
@@ -737,8 +789,6 @@ class PlcRosBridge(Node):
         stat.add("driver", self.driver_name)
         stat.add("backoff_s", f"{self._backoff:.1f}")
         stat.add("last_tick_age_s", f"{time.time() - self._last_tick_ok:.2f}")
-        if self.hb_counter:
-            stat.add("hb_frozen_s", f"{time.time() - self._last_hb_change:.2f}")
         return stat
 
     def destroy_node(self):

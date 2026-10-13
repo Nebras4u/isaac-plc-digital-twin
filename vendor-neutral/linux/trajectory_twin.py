@@ -31,6 +31,17 @@ class RuckigPlanner:
         self.otg = Ruckig(dof, self.dt)
         self.inp = InputParameter(dof)
         self.out = OutputParameter(dof)
+
+        # Normal-motion limits (from robot.yaml).
+        self._max_vel  = max_vel
+        self._max_acc  = max_acc
+        self._max_jerk = max_jerk
+
+        # Aggressive braking profile: stop as fast as mechanically
+        # reasonable when estop / disable fires.
+        self._brake_acc  = max_acc  * 4.0
+        self._brake_jerk = max_jerk * 8.0
+
         self.inp.max_velocity     = [max_vel]  * dof
         self.inp.max_acceleration = [max_acc]  * dof
         self.inp.max_jerk         = [max_jerk] * dof
@@ -49,6 +60,10 @@ class RuckigPlanner:
         self.inp.current_acceleration = [0.0] * self.dof
         self.inp.target_velocity      = [0.0] * self.dof
         self.inp.target_acceleration  = [0.0] * self.dof
+        # Restore normal-motion limits.
+        self.inp.max_velocity     = [self._max_vel]  * self.dof
+        self.inp.max_acceleration = [self._max_acc]  * self.dof
+        self.inp.max_jerk         = [self._max_jerk] * self.dof
         np.copyto(self._last_pos, m)
         self._initialized = True
         self._has_target = False
@@ -73,6 +88,9 @@ class RuckigPlanner:
         self.inp.control_interface = ControlInterface.Velocity
         self.inp.target_velocity = [0.0] * self.dof
         self.inp.target_acceleration = [0.0] * self.dof
+        # Switch to the aggressive braking profile.
+        self.inp.max_acceleration = [self._brake_acc]  * self.dof
+        self.inp.max_jerk         = [self._brake_jerk] * self.dof
         self._stopped = False
 
     def step(self):
@@ -115,8 +133,6 @@ class TrajectoryTwin(Node):
         )
 
         # ---- structured logging ----
-        # Priority: cfg["logging"] if present, else a sane default
-        # writing next to the bridge logs.
         log_cfg = {"logging": cfg.get("logging", {})} if "logging" in cfg else {
             "logging": {
                 "level": "INFO",
@@ -154,6 +170,7 @@ class TrajectoryTwin(Node):
         self._no_feedback_logged = False
         self._estop_logged = False
         self._last_cmd_logged = None
+        self._bad_cmd_logged = False
 
         self.create_subscription(JointState, "/joint_states", self.on_js, 10)
         self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, 10)
@@ -185,7 +202,6 @@ class TrajectoryTwin(Node):
         with self.lock:
             if len(msg.position) >= n:
                 new_cmd = [float(x) for x in msg.position[:n]]
-                # log only on change to avoid flooding at 60 Hz
                 if new_cmd != self._last_cmd_logged:
                     self._last_cmd_logged = list(new_cmd)
                     self.log.info(
@@ -260,32 +276,41 @@ class TrajectoryTwin(Node):
 
         want_run = enable and (not estop) and fresh and cmd_ok
 
-        if want_run:
-            if self._state != RUNNING:
-                self.planner.reset(actual)
-                self.log.info("state_changed",
-                              extra={"from": "IDLE", "to": "RUNNING"})
-                self._state = RUNNING
+        # While STOPPING, the brake always runs to completion (handled at the
+        # bottom). A restart is only possible from IDLE, so a persistent bad
+        # command can never cancel a brake in progress.
+        if want_run and self._state != STOPPING:
             target = self.build_target(cmd, actual)
             if target is None:
-                self.log.warning(
-                    "bad_command",
-                    extra={
-                        "cmd_deg": cmd,
-                        "limits": {j: self.limits_deg[j]
-                                   for j in self.controlled_joints},
-                    },
-                )
-                self._begin_brake("bad command")
-            elif not self.planner.set_target(target):
-                self.log.warning("invalid_target",
-                                 extra={"target_rad": target.tolist()})
-                self._begin_brake("invalid target")
+                if not self._bad_cmd_logged:
+                    self._bad_cmd_logged = True
+                    self.log.warning(
+                        "bad_command",
+                        extra={
+                            "cmd_deg": cmd,
+                            "limits": {j: self.limits_deg[j]
+                                       for j in self.controlled_joints},
+                        },
+                    )
+                if self._state == RUNNING:
+                    self._begin_brake("bad command")
+                # IDLE + bad command: stay idle, do not start.
             else:
-                self.planner.sync_state(actual)
-                sp = self.planner.step()
-                if sp is not None: self.publish(sp)
-        elif self._state == RUNNING:
+                self._bad_cmd_logged = False
+                if self._state == IDLE:
+                    self.planner.reset(actual)
+                    self.log.info("state_changed",
+                                  extra={"from": "IDLE", "to": "RUNNING"})
+                    self._state = RUNNING
+                if not self.planner.set_target(target):
+                    self.log.warning("invalid_target",
+                                     extra={"target_rad": target.tolist()})
+                    self._begin_brake("invalid target")
+                else:
+                    self.planner.sync_state(actual)
+                    sp = self.planner.step()
+                    if sp is not None: self.publish(sp)
+        elif (not want_run) and self._state == RUNNING:
             reason = "fault or disable"
             if estop: reason = "estop"
             elif not enable: reason = "disable"
@@ -306,7 +331,6 @@ class TrajectoryTwin(Node):
         self._msg.position = positions.tolist()
         self.setpoint_pub.publish(self._msg)
 
-        # throttled sample at 1 Hz
         now = time.monotonic()
         if now - self._last_setpoint_log >= 1.0:
             self._last_setpoint_log = now
