@@ -24,6 +24,7 @@ Run:
   python3 plc_ros_bridge.py --ros-args -p config:=plc_ros_bridge.yaml
 """
 import abc
+import csv
 import json
 import math
 import socket
@@ -37,6 +38,48 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Int32, String
 
 from bridge_logger import setup_logging
+
+
+class _LatencyProbe:
+    """Origin-stamped data-age probe.
+
+    One monotonic clock (time.monotonic_ns, shared by all processes on the
+    same host/kernel). The bridge stamps the PLC read; trajectory_twin and
+    physics_twin append their publish times to the tag carried in
+    header.frame_id; the bridge closes the loop when it finishes writing
+    ActAng and records one CSV row per origin (first arrival only).
+    Enabled with `latency_probe: true` in the bridge YAML.
+    """
+    COLS = ["origin_ns", "read_start_ns", "read_done_ns", "cmd_pub_ns",
+            "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns"]
+
+    def __init__(self, path):
+        self._f = open(path, "w", newline="")
+        self._w = csv.writer(self._f)
+        self._w.writerow(self.COLS)
+        self._f.flush()          # header visible immediately
+        self._last = None
+
+    def record(self, tag, js_recv_ns, write_done_ns):
+        parts = tag.split(";")
+        if len(parts) != 7 or parts[0] != "p":
+            return False
+        try:
+            nums = [int(x) for x in parts[1:]]
+        except ValueError:
+            return False
+        if nums[0] == self._last:      # same origin already recorded
+            return False
+        self._last = nums[0]
+        self._w.writerow(nums + [js_recv_ns, write_done_ns])
+        self._f.flush()
+        return True
+
+    def close(self):
+        try:
+            self._f.close()
+        except Exception:
+            pass
 
 try:
     from diagnostic_updater import Updater, FunctionDiagnosticTask
@@ -511,6 +554,14 @@ class PlcRosBridge(Node):
                 JointState, robot.get("cmd_ang_topic", "/plc/cmd_ang"), 10
             )
 
+        # ---- optional latency probe (off by default) ----
+        self._probe = (
+            _LatencyProbe(cfg.get("latency_probe_file", "latency_probe.csv"))
+            if cfg.get("latency_probe", False) else None
+        )
+        self._js_tag = ""
+        self._js_recv_ns = 0
+
         # ---- joint_states feedback ----
         self.joint_idx = {j: i for i, j in enumerate(self.joints)}
         self._js_lock = threading.Lock()
@@ -580,6 +631,9 @@ class PlcRosBridge(Node):
     # ------------------------------------------------------------------
     def on_joint_states(self, msg):
         with self._js_lock:
+            if self._probe is not None:
+                self._js_tag = msg.header.frame_id
+                self._js_recv_ns = time.monotonic_ns()
             for name, pos in zip(msg.name, msg.position):
                 i = self.joint_idx.get(name)
                 if i is not None:
@@ -674,12 +728,14 @@ class PlcRosBridge(Node):
             return
         tick_id = int(time.time() * 1000) % 1000000
         t0 = time.time()
+        t_rs = time.monotonic_ns()
         try:
             raw = self.driver.read(
                 [self.sig[n]["addr"] for n in self.read_names]
             )
             vals = {n: self._get(n, raw) for n in self.read_names}
             read_ms = (time.time() - t0) * 1000.0
+            t_rd = time.monotonic_ns()
             if read_ms > 200.0:
                 self.log.warning(
                     "slow_read",
@@ -687,10 +743,11 @@ class PlcRosBridge(Node):
                 )
 
             self._last_tick_ok = time.time()
-            self._publish(vals)
+            self._publish(vals, t_rs, t_rd)
 
             writes = {}
             pending_ack = None
+            probe_tag, probe_recv, act_written = "", 0, False
 
             if self.hb_counter and self.hb_ack:
                 hb = vals.get(self.hb_counter)
@@ -700,6 +757,8 @@ class PlcRosBridge(Node):
 
             with self._js_lock:
                 if self.act_ang and self._js_ok:
+                    act_written = True
+                    probe_tag, probe_recv = self._js_tag, self._js_recv_ns
                     if len(self.act_ang) == 1:
                         sig = self.act_ang[0]
                         addr = self.sig[sig]["addr"]
@@ -716,6 +775,10 @@ class PlcRosBridge(Node):
 
             if writes:
                 failed = self.driver.write(writes)
+                if (self._probe is not None and act_written and probe_tag
+                        and not failed):
+                    self._probe.record(
+                        probe_tag, probe_recv, time.monotonic_ns())
                 for a in failed:
                     self.log.warning(
                         "write_failed",
@@ -747,7 +810,7 @@ class PlcRosBridge(Node):
             self._set_connected(False)
             self._last_try = 0.0
 
-    def _publish(self, vals):
+    def _publish(self, vals, t_rs=None, t_rd=None):
         for p, pub in self.pubs:
             v = vals.get(p["signal"])
             if v is not None:
@@ -767,6 +830,9 @@ class PlcRosBridge(Node):
             js.header.stamp = self.get_clock().now().to_msg()
             js.name = list(self.joints)
             js.position = ang
+            if self._probe is not None and t_rs is not None:
+                js.header.frame_id = (
+                    f"p;{t_rs};{t_rs};{t_rd};{time.monotonic_ns()}")
             self.pub_cmd_ang.publish(js)
 
     # ------------------------------------------------------------------
@@ -792,6 +858,8 @@ class PlcRosBridge(Node):
         return stat
 
     def destroy_node(self):
+        if getattr(self, "_probe", None) is not None:
+            self._probe.close()
         try:
             self.driver.close()
         except Exception:
