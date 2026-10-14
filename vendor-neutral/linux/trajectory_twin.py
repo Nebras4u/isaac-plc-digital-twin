@@ -171,6 +171,7 @@ class TrajectoryTwin(Node):
         self._estop_logged = False
         self._last_cmd_logged = None
         self._bad_cmd_logged = False
+        self._cmd_tag = ""   # latency-probe tag from the bridge (optional)
 
         self.create_subscription(JointState, "/joint_states", self.on_js, 10)
         self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, 10)
@@ -209,6 +210,8 @@ class TrajectoryTwin(Node):
                         extra={"cmd_deg": new_cmd},
                     )
                 self._cmd_deg = new_cmd
+                tag = msg.header.frame_id
+                self._cmd_tag = tag if tag.startswith("p;") else ""
                 self._cmd_ok = True
                 self._last_cmd_t = time.monotonic()
 
@@ -329,6 +332,9 @@ class TrajectoryTwin(Node):
     def publish(self, positions):
         self._msg.header.stamp = self.get_clock().now().to_msg()
         self._msg.position = positions.tolist()
+        tag = self._cmd_tag
+        self._msg.header.frame_id = (
+            f"{tag};{time.monotonic_ns()}" if tag else "")
         self.setpoint_pub.publish(self._msg)
 
         now = time.monotonic()
