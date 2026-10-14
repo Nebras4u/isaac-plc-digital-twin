@@ -6,6 +6,7 @@
 #   tcp_json → plc_server_win.py on Windows (cross-platform)
 #   plc_api  → direct PLCSIM Advanced API (Windows-only, fastest)
 # ==========================================================================
+latency_probe: false
 
 plc:
   driver: opcua               # opcua | tcp_json | plc_api
