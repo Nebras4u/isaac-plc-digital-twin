@@ -6,6 +6,7 @@
 # Falls back to set_joint_efforts if the API is not available.
 
 import asyncio
+import sys
 import time
 import numpy as np
 import yaml
@@ -13,6 +14,7 @@ import omni.kit.app
 import omni.usd
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, HistoryPolicy, ReliabilityPolicy
 from sensor_msgs.msg import JointState
 from isaacsim.core.prims import Articulation
 from pxr import UsdPhysics
@@ -134,9 +136,20 @@ class PhysicsTwin(Node):
         self.gravity_status = gravity_status
         self.latest_setpoint = None
         self._last_sp_t = 0.0
+        self._tag = ""          # latency-probe tag from trajectory_twin
+        self._applied_tag = ""  # tag of the setpoint last handed to physics
 
+        # Keep only the newest setpoint. rclpy.spin_once() below handles one
+        # message per Isaac frame; with the default depth of 10 and Isaac
+        # running slower than the 60 Hz publisher, the queue fills and the
+        # oldest (~10 periods old) setpoint is applied.
+        sp_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
         self.create_subscription(
-            JointState, "/servo_setpoints", self.on_setpoint, 10
+            JointState, "/servo_setpoints", self.on_setpoint, sp_qos
         )
         self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
 
@@ -146,6 +159,7 @@ class PhysicsTwin(Node):
 
     def on_setpoint(self, msg: JointState):
         self.latest_setpoint = dict(zip(msg.name, msg.position))
+        self._tag = msg.header.frame_id
         self._last_sp_t = time.monotonic()
 
     def step(self):
@@ -171,6 +185,7 @@ class PhysicsTwin(Node):
             positions=target.reshape(1, -1),
             joint_indices=list(range(len(DOF_ORDER))),
         )
+        self._applied_tag = self._tag
 
         # 2) Gravity compensation (only if using "efforts" fallback)
         if self.gravity_status == "efforts":
@@ -192,6 +207,8 @@ class PhysicsTwin(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(DOF_ORDER)
         msg.position = [float(pos[0][i]) for i in range(len(DOF_ORDER))]
+        tag = self._applied_tag
+        msg.header.frame_id = f"{tag};{time.monotonic_ns()}" if tag else ""
         self.js_pub.publish(msg)
 
 
@@ -227,14 +244,28 @@ async def main():
     node = PhysicsTwin(robot, gravity_status)
     print("Entering main loop. Publishing /joint_states @ 60 Hz.")
 
-    while True:
-        node.step()
-        node.publish_states()
+    try:
+        while True:
+            node.step()
+            node.publish_states()
+            try:
+                rclpy.spin_once(node, timeout_sec=0.0)
+            except Exception:
+                pass
+            await omni.kit.app.get_app().next_update_async()
+    finally:
+        # Runs when this task is cancelled (re-running the script) so the
+        # old node stops publishing /joint_states and consuming setpoints.
         try:
-            rclpy.spin_once(node, timeout_sec=0.0)
+            node.destroy_node()
         except Exception:
             pass
-        await omni.kit.app.get_app().next_update_async()
 
 
-_task = asyncio.ensure_future(main())
+# Re-running this script in the Script Editor must not leave the previous
+# loop running: duplicate loops publish /joint_states several times and
+# fight over the same articulation targets.
+_prev = getattr(sys, "_physics_twin_task", None)
+if _prev is not None and not _prev.done():
+    _prev.cancel()
+sys._physics_twin_task = asyncio.ensure_future(main())
