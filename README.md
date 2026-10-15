@@ -10,6 +10,8 @@ An industrial-grade **Digital Twin platform** for robot arms driven by
 **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through
 **ROS 2**.
 
+![S7-1500T ↔ ROS2 ↔ Isaac Sim](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/yaskawa/docs/images/PLC-ROS2-ISAAC.jpg)
+
 The repository hosts three generations of the platform, side by side:
 
 | Generation                 | Robot               | Transport                  | Location                                         | Status       |
