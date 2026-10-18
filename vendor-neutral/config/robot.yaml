@@ -18,11 +18,11 @@ robot:
   isaac_scope: /World/Main_Robot_L_URDF
 
   joint_paths:
-    joint_1: "{scope}/base_link/joint_1"
-    joint_2: "{scope}/link_1/joint_2"
-    joint_3: "{scope}/link_2/joint_3"
-    joint_4: "{scope}/link_4/joint_4"
-    joint_5: "{scope}/link_3/joint_5"
+    joint_1: "{scope}/joints/joint_1"
+    joint_2: "{scope}/joints/joint_2"
+    joint_3: "{scope}/joints/joint_3"
+    joint_4: "{scope}/joints/joint_4"
+    joint_5: "{scope}/joints/joint_5"
 
   ruckig:
     control_hz: 60.0
