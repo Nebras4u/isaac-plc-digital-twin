@@ -33,6 +33,7 @@ import time
 
 import yaml
 import rclpy
+import rclpy.executors
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Int32, String
@@ -117,6 +118,10 @@ class TcpJsonDriver(PlcDriver):
     """Talks to plc_server_win.py over newline-delimited JSON.
 
     Rejects stale replies (seq <= last seen) after reconnect.
+
+    ``_last_sock_ms`` / ``_last_parse_ms`` are filled on every ``read()`` so
+    the bridge can distinguish real socket time from GIL wait time when
+    diagnosing ``slow_read`` warnings.
     """
 
     def __init__(self, cfg):
@@ -126,6 +131,8 @@ class TcpJsonDriver(PlcDriver):
         self.sock = None
         self.buf = b""
         self._last_seq = 0
+        self._last_sock_ms = 0.0
+        self._last_parse_ms = 0.0
 
     def connect(self):
         self.close()
@@ -133,6 +140,10 @@ class TcpJsonDriver(PlcDriver):
             (self.host, self.port), timeout=self.timeout
         )
         self.sock.settimeout(self.timeout)
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
         self.buf = b""
         self._last_seq = 0
 
@@ -161,13 +172,18 @@ class TcpJsonDriver(PlcDriver):
         return resp
 
     def read(self, addrs):
+        t0 = time.perf_counter()
         resp = self._request({"cmd": "read", "tags": list(addrs)})
+        t1 = time.perf_counter()
         if "values" not in resp:
             raise RuntimeError(f"bad read reply: {resp}")
         out = {}
         for a in addrs:
             v = resp["values"].get(a)
             out[a] = None if isinstance(v, str) and v.startswith("ERR:") else v
+        t2 = time.perf_counter()
+        self._last_sock_ms = (t1 - t0) * 1000.0
+        self._last_parse_ms = (t2 - t1) * 1000.0
         return out
 
     def write(self, values):
@@ -219,6 +235,8 @@ class OpcUaDriver(PlcDriver):
         self.nodes = {}
         self.types = {}
         self._lock = threading.RLock()
+        self._last_sock_ms = 0.0
+        self._last_parse_ms = 0.0
 
     def set_signal_types(self, types):
         self.types = dict(types)
@@ -291,6 +309,7 @@ class OpcUaDriver(PlcDriver):
         addrs = list(addrs)
         if not addrs:
             return {}
+        t0 = time.perf_counter()
         with self._lock:
             if self.client is None:
                 raise ConnectionError("OPC UA client is not connected")
@@ -304,6 +323,9 @@ class OpcUaDriver(PlcDriver):
                         out[a] = self._node(a).read_value()
                     except Exception:
                         out[a] = None
+                t1 = time.perf_counter()
+                self._last_sock_ms = (t1 - t0) * 1000.0
+                self._last_parse_ms = 0.0
                 return out
 
             out = {}
@@ -314,7 +336,10 @@ class OpcUaDriver(PlcDriver):
                     out[a] = v
                 except Exception:
                     out[a] = None
-            return out
+        t1 = time.perf_counter()
+        self._last_sock_ms = (t1 - t0) * 1000.0
+        self._last_parse_ms = 0.0
+        return out
 
     # -- write ------------------------------------------------------------
     def _make_variant(self, addr, value):
@@ -372,6 +397,8 @@ class PlcApiDriver(PlcDriver):
     def __init__(self, cfg):
         self.instance_name = cfg.get("instance", "ros2_")
         self.instance = None
+        self._last_sock_ms = 0.0
+        self._last_parse_ms = 0.0
 
     def connect(self):
         import clr
@@ -420,6 +447,7 @@ class PlcApiDriver(PlcDriver):
             self.instance.WriteInt16(addr, int(value))
 
     def read(self, addrs):
+        t0 = time.perf_counter()
         out = {}
         for a in addrs:
             try:
@@ -435,6 +463,9 @@ class PlcApiDriver(PlcDriver):
                     out[a] = elems if elems else None
                 except Exception:
                     out[a] = None
+        t1 = time.perf_counter()
+        self._last_sock_ms = (t1 - t0) * 1000.0
+        self._last_parse_ms = 0.0
         return out
 
     def write(self, values):
@@ -584,8 +615,19 @@ class PlcRosBridge(Node):
         self._warn_cooldown = cfg.get("warn_cooldown", 60.0)
 
         # ---- watchdog ----
-        self._watchdog_timeout = cfg.get("watchdog_timeout", 2.0)
-        self._last_tick_ok = time.time()
+        self._watchdog_timeout = cfg.get("watchdog_timeout", 4.0)
+        self._last_tick_ok = time.monotonic()
+
+        # ---- publish dedupe cache (state topics only — NOT cmd_ang) ----
+        self._last_pub = {}
+        self._last_cmd_ang = None
+
+        # ---- tick stats ----
+        self._tick_count = 0
+        self._slow_count = 0
+        self._slow_sock_sum_ms = 0.0
+        self._slow_gap_sum_ms = 0.0
+        self._stats_every = max(1, int(cfg.get("poll_hz", 60.0) * 10))
 
         # ---- diagnostics ----
         self._diag_updater = None
@@ -644,17 +686,14 @@ class PlcRosBridge(Node):
         if state == self.connected:
             return
         if state:
-            self._last_tick_ok = time.time()
+            self._last_tick_ok = time.monotonic()
             self.log.info(
                 "plc_connected",
                 extra={"driver": self.driver_name, "backoff_s": self._backoff},
             )
             if self._estop_from_plc:
-                # The real PLC estop value is published on the next tick;
-                # do not declare "cleared" before reading it.
                 self.log.info("plc_reconnected_estop_from_plc")
             else:
-                # No PLC estop signal configured: fall back to clearing.
                 self.pub_estop.publish(Bool(data=False))
                 self.log.info("plc_reconnected_estop_cleared")
         else:
@@ -668,7 +707,7 @@ class PlcRosBridge(Node):
         self.pub_conn.publish(Bool(data=state))
 
     def _try_connect(self):
-        now = time.time()
+        now = time.monotonic()
         if now - self._last_try < self._backoff:
             return False
         self._last_try = now
@@ -707,7 +746,7 @@ class PlcRosBridge(Node):
                 return v
             return CAST[s["type"]](v)
         except (TypeError, ValueError) as e:
-            now = time.time()
+            now = time.monotonic()
             last = self._warned.get(name, 0.0)
             if now - last > self._warn_cooldown:
                 self._warned[name] = now
@@ -726,23 +765,33 @@ class PlcRosBridge(Node):
     def tick(self):
         if not self.connected and not self._try_connect():
             return
-        tick_id = int(time.time() * 1000) % 1000000
-        t0 = time.time()
+        tick_id = int(time.monotonic() * 1000) % 1000000
         t_rs = time.monotonic_ns()
         try:
             raw = self.driver.read(
                 [self.sig[n]["addr"] for n in self.read_names]
             )
-            vals = {n: self._get(n, raw) for n in self.read_names}
-            read_ms = (time.time() - t0) * 1000.0
             t_rd = time.monotonic_ns()
+            vals = {n: self._get(n, raw) for n in self.read_names}
+            read_ms = (t_rd - t_rs) / 1e6
+            sock_ms = getattr(self.driver, "_last_sock_ms", 0.0)
+            gap_ms = max(0.0, read_ms - sock_ms)
+
             if read_ms > 200.0:
+                self._slow_count += 1
+                self._slow_sock_sum_ms += sock_ms
+                self._slow_gap_sum_ms += gap_ms
                 self.log.warning(
                     "slow_read",
-                    extra={"tick_id": tick_id, "read_ms": round(read_ms, 1)},
+                    extra={
+                        "tick_id": tick_id,
+                        "read_ms": round(read_ms, 1),
+                        "sock_ms": round(sock_ms, 2),
+                        "gap_ms": round(gap_ms, 1),
+                    },
                 )
 
-            self._last_tick_ok = time.time()
+            self._last_tick_ok = time.monotonic()
             self._publish(vals, t_rs, t_rd)
 
             writes = {}
@@ -790,15 +839,26 @@ class PlcRosBridge(Node):
                 ):
                     self._last_ack = pending_ack
 
-            self.log.debug(
-                "tick_ok",
-                extra={
-                    "tick_id": tick_id,
-                    "read_ms": round(read_ms, 2),
-                    "n_read": len(self.read_names),
-                    "n_write": len(writes),
-                },
-            )
+            self._tick_count += 1
+            if self._tick_count % self._stats_every == 0:
+                avg_sock = (self._slow_sock_sum_ms / self._slow_count
+                            if self._slow_count else 0.0)
+                avg_gap = (self._slow_gap_sum_ms / self._slow_count
+                           if self._slow_count else 0.0)
+                self.log.info(
+                    "tick_stats",
+                    extra={
+                        "ticks": self._tick_count,
+                        "slow": self._slow_count,
+                        "slow_pct": round(
+                            100.0 * self._slow_count / self._tick_count, 2),
+                        "avg_slow_sock_ms": round(avg_sock, 2),
+                        "avg_slow_gap_ms": round(avg_gap, 1),
+                    },
+                )
+                self._slow_count = 0
+                self._slow_sock_sum_ms = 0.0
+                self._slow_gap_sum_ms = 0.0
 
         except Exception as e:
             self.log.error(
@@ -811,11 +871,24 @@ class PlcRosBridge(Node):
             self._last_try = 0.0
 
     def _publish(self, vals, t_rs=None, t_rd=None):
+        # Dedupe state topics only (velocity, enable, estop, alive, comm).
+        # Those are latched state — republishing an unchanged value is
+        # pointless DDS traffic.
         for p, pub in self.pubs:
             v = vals.get(p["signal"])
-            if v is not None:
-                pub.publish(MSG_TYPES[p["type"]](data=CAST[p["type"]](v)))
+            if v is None:
+                continue
+            cast_v = CAST[p["type"]](v)
+            key = p["topic"]
+            if self._last_pub.get(key) == cast_v:
+                continue
+            self._last_pub[key] = cast_v
+            pub.publish(MSG_TYPES[p["type"]](data=cast_v))
 
+        # cmd_ang is NOT deduped: trajectory_twin uses message recency as
+        # a liveness signal (0.5 s watchdog). If the bridge stops publishing
+        # because the value is unchanged, trajectory_twin treats it as a
+        # link loss and refuses to run.
         if self.pub_cmd_ang:
             ang = []
             for n in self.cmd_ang:
@@ -826,6 +899,8 @@ class PlcRosBridge(Node):
                     ang.extend(v)
                 else:
                     ang.append(v)
+            self._last_cmd_ang = list(ang)
+
             js = JointState()
             js.header.stamp = self.get_clock().now().to_msg()
             js.name = list(self.joints)
@@ -837,7 +912,7 @@ class PlcRosBridge(Node):
 
     # ------------------------------------------------------------------
     def _check_watchdog(self):
-        now = time.time()
+        now = time.monotonic()
         if self.connected and now - self._last_tick_ok > self._watchdog_timeout:
             stalled = round(now - self._last_tick_ok, 2)
             self.log.error("watchdog_tick_stalled",
@@ -854,7 +929,8 @@ class PlcRosBridge(Node):
             stat.summary(DiagnosticStatus.ERROR, "disconnected")
         stat.add("driver", self.driver_name)
         stat.add("backoff_s", f"{self._backoff:.1f}")
-        stat.add("last_tick_age_s", f"{time.time() - self._last_tick_ok:.2f}")
+        stat.add("last_tick_age_s",
+                 f"{time.monotonic() - self._last_tick_ok:.2f}")
         return stat
 
     def destroy_node(self):
@@ -874,8 +950,10 @@ class PlcRosBridge(Node):
 def main():
     rclpy.init()
     node = PlcRosBridge()
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:

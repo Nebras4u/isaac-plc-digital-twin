@@ -137,7 +137,7 @@ class TrajectoryTwin(Node):
             "logging": {
                 "level": "INFO",
                 "console": True,
-                "to_ros": True,
+                "to_ros": False,
                 "file": "/workspace/plc_bridge_logs/trajectory.log",
                 "json_file": "/workspace/plc_bridge_logs/trajectory.jsonl",
                 "max_bytes": 10 * 1024 * 1024,
@@ -312,7 +312,7 @@ class TrajectoryTwin(Node):
                 else:
                     self.planner.sync_state(actual)
                     sp = self.planner.step()
-                    if sp is not None: self.publish(sp)
+                    if sp is not None: self.publish(sp, cmd, actual)
         elif (not want_run) and self._state == RUNNING:
             reason = "fault or disable"
             if estop: reason = "estop"
@@ -323,13 +323,13 @@ class TrajectoryTwin(Node):
 
         if self._state == STOPPING:
             sp = self.planner.step()
-            if sp is not None: self.publish(sp)
+            if sp is not None: self.publish(sp, cmd, actual)
             if self.planner.stopped:
                 self.log.info("state_changed",
                               extra={"from": "STOPPING", "to": "IDLE"})
                 self._state = IDLE
 
-    def publish(self, positions):
+    def publish(self, positions, cmd_deg=None, actual=None):
         self._msg.header.stamp = self.get_clock().now().to_msg()
         self._msg.position = positions.tolist()
         tag = self._cmd_tag
@@ -340,10 +340,19 @@ class TrajectoryTwin(Node):
         now = time.monotonic()
         if now - self._last_setpoint_log >= 1.0:
             self._last_setpoint_log = now
-            self.log.info(
-                "setpoint_sample",
-                extra={"position_rad": positions.tolist()},
-            )
+
+            # Terminal-only column-aligned table (cmd vs actual vs setpoint, degrees).
+            lines = [f"{'joint':<10}{'cmd_deg':>12}{'actual_deg':>14}{'setpt_deg':>14}",
+                     "-" * 50]
+            for i, j in enumerate(self.controlled_joints):
+                idx = self.name_to_idx[j]
+                c = cmd_deg[i] if cmd_deg is not None else None
+                a = math.degrees(float(actual[idx])) if actual is not None else None
+                s = math.degrees(float(positions[idx]))
+                cs = f"{c:>12.3f}" if c is not None else f"{'--':>12}"
+                as_ = f"{a:>14.3f}" if a is not None else f"{'--':>14}"
+                lines.append(f"{j:<10}{cs}{as_}{s:>14.3f}")
+            print("\n".join(lines), flush=True)
 
     def _begin_brake(self, reason):
         if self._state == RUNNING:

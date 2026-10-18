@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PLC](https://img.shields.io/badge/PLC-Vendor--Neutral-lightgrey)](#supported-plcs)
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
-[![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.0-green)](https://developer.nvidia.com/isaac-sim)
+[![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-yellow)](https://www.python.org)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#control-loop-latency)
@@ -45,6 +45,7 @@ This folder (`vendor-neutral/`) is the evolution of two robot-specific implement
 - [Results](#results)
   - [Tracking Accuracy](#tracking-accuracy)
   - [Control-Loop Latency](#control-loop-latency)
+  - [Bridge Real-Time Behaviour](#bridge-real-time-behaviour)
   - [Clock Drift Calibration](#clock-drift-calibration)
 - [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
@@ -87,89 +88,95 @@ The same code runs unchanged across all combinations. Only configuration differs
 
 ## Architecture
 
-```text
-+----------------------------------------------------------------------+
-|                          PLC (any vendor)                            |
-|   Siemens S7-1500 - Beckhoff TwinCAT - Rockwell - OPC UA servers     |
-+--------------------------------+-------------------------------------+
-                                 |
-                       one of three transports
-                                 |
-        +------------------------+--------------------------+
-        |                        |                          |
-   tcp_json                    opcua                     plc_api
- (Windows server)           (native OPC UA)         (PLCSIM direct)
-        |                        |                          |
-        +------------------------+--------------------------+
-                                 |
-                    +------------v------------+
-                    |  linux/plc_ros_bridge.py|
-                    |  (+ plc_drivers.py)     |
-                    |  (+ plc_config.py)      |
-                    +------------+------------+
-                                 |
-                            ROS 2 topics
-                                 |
-                    +------------v------------+
-                    |linux/trajectory_twin.py |
-                    | (Ruckig + state machine)|
-                    +------------+------------+
-                                 |
-                    +------------v------------+
-                    |  isaac/physics_twin.py  |
-                    |  (inside Isaac Sim)     |
-                    +-------------------------+
-```
+    +----------------------------------------------------------------------+
+    |                          PLC (any vendor)                            |
+    |   Siemens S7-1500 - Beckhoff TwinCAT - Rockwell - OPC UA servers     |
+    +--------------------------------+-------------------------------------+
+                                     |
+                           one of three transports
+                                     |
+            +------------------------+--------------------------+
+            |                        |                          |
+       tcp_json                    opcua                     plc_api
+     (Windows server)           (native OPC UA)         (PLCSIM direct)
+            |                        |                          |
+            +------------------------+--------------------------+
+                                     |
+                        +------------v------------+
+                        |  linux/plc_ros_bridge.py|
+                        |  (+ plc_drivers.py)     |
+                        |  (+ plc_config.py)      |
+                        +------------+------------+
+                                     |
+                                ROS 2 topics
+                                     |
+                        +------------v------------+
+                        |linux/trajectory_twin.py |
+                        | (Ruckig + state machine)|
+                        +------------+------------+
+                                     |
+                        +------------v------------+
+                        |  isaac/physics_twin.py  |
+                        |  (inside Isaac Sim)     |
+                        +-------------------------+
+
+### Runtime threading model
+
+`plc_ros_bridge.py` runs on a **`SingleThreadedExecutor`**. This is deliberate:
+
+- Timer (`tick()`) and subscriber (`on_joint_states()`) callbacks run strictly in sequence.
+- They cannot race for the Python GIL mid-tick, which was causing 200-1000 ms `read` stalls on VMs.
+- The 60 Hz tick is preserved; the only cost is that a subscriber callback can delay the next tick by its own runtime (~20-50 µs).
+
+`trajectory_twin.py` and `physics_twin.py` use the default executor; they do not touch the same critical timing as the bridge.
 
 ---
 
 ## Repository Structure
 
-```text
-vendor-neutral/
-|
-+-- README.md                         # This file
-+-- CHANGELOG.md                      # Gen 3 history
-|
-+-- windows/
-|   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
-|
-+-- linux/
-|   +-- trajectory_twin.py            # Ruckig trajectory + state machine
-|   +-- plc_ros_bridge.py             # ROS 2 <-> PLC bridge
-|   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
-|   +-- plc_config.py                 # signal mapping + extractor
-|
-+-- isaac/
-|   +-- physics_twin.py               # Articulation driver
-|   +-- Main_Robot_L_URDF_tool.urdf
-|   +-- Full_Control.usd
-|
-+-- config/
-|   +-- plc_ros_bridge.yaml           # Signal mapping
-|   +-- robot.yaml                    # Joints, limits, Ruckig, drives
-|
-+-- tools/
-|   +-- latency_simpel.py             # Quick latency check
-|   +-- latency_academic.py           # LBP / p99.9 / jitter
-|   +-- latency_full_loop.py          # Full-loop L1+L2+L3+L4
-|   +-- compare_results.py            # A/B comparison tool
-|   +-- srv.py                        # Clock responder
-|   +-- cli.py                        # Clock drift client
-|   +-- info.txt
-|
-+-- plc/
-|   +-- SCL_heartbeat_OB30.txt
-|   +-- SCL_MAIN.txt
-|   +-- SCL_heartbeat_OB30-init.txt
-|   +-- SCL_MAIN-init.txt
-|   +-- DB.txt
-|
-+-- docs/
-    +-- migration.md
-    +-- latency_comparison.md         # Full comparison report
-    +-- latency_full_loop_OPC-UA.md   # Baseline report
-```
+    vendor-neutral/
+    |
+    +-- README.md                         # This file
+    +-- CHANGELOG.md                      # Gen 3 history
+    |
+    +-- windows/
+    |   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
+    |
+    +-- linux/
+    |   +-- trajectory_twin.py            # Ruckig trajectory + state machine
+    |   +-- plc_ros_bridge.py             # ROS 2 <-> PLC bridge
+    |   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
+    |   +-- plc_config.py                 # signal mapping + extractor
+    |
+    +-- isaac/
+    |   +-- physics_twin.py               # Articulation driver
+    |   +-- Main_Robot_L_URDF_tool.urdf
+    |   +-- Full_Control.usd
+    |
+    +-- config/
+    |   +-- plc_ros_bridge.yaml           # Signal mapping
+    |   +-- robot.yaml                    # Joints, limits, Ruckig, drives
+    |
+    +-- tools/
+    |   +-- latency_simpel.py             # Quick latency check
+    |   +-- latency_academic.py           # LBP / p99.9 / jitter
+    |   +-- latency_full_loop.py          # Full-loop L1+L2+L3+L4
+    |   +-- compare_results.py            # A/B comparison tool
+    |   +-- srv.py                        # Clock responder
+    |   +-- cli.py                        # Clock drift client
+    |   +-- info.txt
+    |
+    +-- plc/
+    |   +-- SCL_heartbeat_OB30.txt
+    |   +-- SCL_MAIN.txt
+    |   +-- SCL_heartbeat_OB30-init.txt
+    |   +-- SCL_MAIN-init.txt
+    |   +-- DB.txt
+    |
+    +-- docs/
+        +-- migration.md
+        +-- latency_comparison.md         # Full comparison report
+        +-- latency_full_loop_OPC-UA.md   # Baseline report
 
 ---
 
@@ -205,44 +212,38 @@ vendor-neutral/
 
 **Isaac Sim host:**
 
-- Isaac Sim 4.x or 5.0
+- Isaac Sim 5.1 (5.0 supported)
 - ROS 2 Bridge extension enabled
 
 ### Startup Sequence
 
-```bash
-# 1. Windows: TCP/JSON server (only if driver: tcp_json)
-cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
+    # 1. Windows: TCP/JSON server (only if driver: tcp_json)
+    cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
 
-# 2. Isaac Sim Script Editor: physics twin
-#    Run: isaac/physics_twin.py
+    # 2. Isaac Sim Script Editor: physics twin
+    #    Run: isaac/physics_twin.py
 
-# 3. Linux: PLC <-> ROS bridge (with CPU pinning for latency)
-taskset -c 2 python3 plc_ros_bridge.py \
-    --ros-args -p config:=../config/plc_ros_bridge.yaml
+    # 3. Linux: PLC <-> ROS bridge (with CPU pinning for latency)
+    taskset -c 2 python3 plc_ros_bridge.py \
+        --ros-args -p config:=../config/plc_ros_bridge.yaml
 
-# 4. Linux: trajectory twin (Ruckig trajectory generator)
-taskset -c 3 python3 trajectory_twin.py \
-    --ros-args -p robot:=../config/robot.yaml
-```
+    # 4. Linux: trajectory twin (Ruckig trajectory generator)
+    taskset -c 3 python3 trajectory_twin.py \
+        --ros-args -p robot:=../config/robot.yaml
 
 ### Switching Transport
 
 Edit one line in `config/plc_ros_bridge.yaml`:
 
-```yaml
-plc:
-  driver: opcua          # change to: tcp_json | opcua | plc_api
-```
+    plc:
+      driver: opcua          # change to: tcp_json | opcua | plc_api
 
 Everything else stays the same.
 
 ### Run Tests (unit tests for planner + config)
 
-```bash
-cd linux
-python3 -m pytest ../tests -v
-```
+    cd linux
+    python3 -m pytest ../tests -v
 
 *(Tests to be added in a follow-up commit.)*
 
@@ -252,40 +253,64 @@ python3 -m pytest ../tests -v
 
 ### `config/plc_ros_bridge.yaml` — Signal mapping
 
-```yaml
-plc:
-  driver: opcua          # opcua | tcp_json | plc_api
-  endpoint: opc.tcp://192.168.100.50:4840   # opcua
-  timeout: 0.5
-  host: 192.168.100.18                      # tcp_json
-  port: 5000
+    latency_probe: false        # enable per-tick CSV timing probe
 
-poll_hz: 60
+    plc:
+      driver: tcp_json               # opcua | tcp_json | plc_api
+      endpoint: opc.tcp://192.168.100.50:4840   # opcua only
+      host: 192.168.100.18                      # tcp_json only
+      port: 5000                                # tcp_json only
+      timeout: 1.5                              # all drivers — see note below
 
-vars:
-  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
-  db: 'MAIN_KUKA_KR210_L150_L'
+    poll_hz: 60
+    watchdog_timeout: 4.0
 
-signals:
-  cmd_ang: {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
-  act_ang: {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
-  estop:   {addr: 'MainRobotLeft_Emergency_Stop_Active', type: bool, dir: read}
-  ...
+    logging:
+      level: INFO
+      console: true
+      to_ros: false              # do NOT duplicate to ROS logger
+      file: logs/bridge.log
+      json_file: logs/bridge.jsonl
+      max_bytes: 10485760
+      backup_count: 5
 
-publish:
-  - {topic: /plc/emergency_stop, signal: estop, type: bool}
-  ...
+    vars:
+      ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
+      db: 'MAIN_KUKA_KR210_L150_L'
 
-heartbeat:
-  counter: hb_counter
-  ack: ros_ack_counter
+    signals:
+      cmd_ang: {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
+      act_ang: {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
+      estop:   {addr: 'MainRobotLeft_Emergency_Stop_Active', type: bool, dir: read}
 
-robot:
-  joints:  [joint_1, joint_2, joint_3, joint_4]
-  cmd_ang: [cmd_ang]     # one array signal (all joints)
-  act_ang: [act_ang]
-  cmd_ack: cmd_ack
-```
+    publish:
+      - {topic: /plc/emergency_stop, signal: estop, type: bool}
+
+    heartbeat:
+      counter: hb_counter
+      ack: ros_ack_counter
+
+    robot:
+      joints:  [joint_1, joint_2, joint_3, joint_4]
+      cmd_ang: [cmd_ang]     # one array signal (all joints)
+      act_ang: [act_ang]
+      cmd_ack: cmd_ack
+
+**Why `timeout: 1.5`?** The PLC server occasionally has a 200-1000 ms
+cold-start stall (new TCP connection, first read after reconnect). A
+timeout under ~200 ms fires the reconnect cascade on every such stall,
+publishes a spurious e-stop, and requires a 1 s backoff. 1.5 s absorbs
+all observed stalls in a single read attempt while still surfacing a
+genuine link failure within two poll periods.
+
+**Why `to_ros: false`?** When both the console/file handler and the ROS
+logger are attached, every record appears twice on the terminal. The
+JSONL file retains full structure; the ROS echo is redundant.
+
+**Why `watchdog_timeout: 4.0`?** The bridge treats a gap of >4 s between
+successful ticks as a liveness failure and publishes `/plc/emergency_stop`.
+At 60 Hz with 200-400 ms server stalls, 4 s is the first threshold that
+does not produce false positives.
 
 If a signal referenced in the `robot`, `publish`, or `heartbeat` sections is
 missing from `signals`, the bridge refuses to start.
@@ -294,12 +319,45 @@ If `/plc/emergency_stop` is published from a PLC signal (as above), the
 bridge takes the e-stop state from the PLC after a reconnect. Without that
 signal it clears the e-stop on reconnect.
 
+**Important:** `/plc/cmd_ang` is republished on **every** tick, even when
+the joint targets have not changed. `trajectory_twin.py` uses message
+recency as a liveness signal (0.5 s watchdog). Deduplicating unchanged
+`cmd_ang` messages causes the twin to stop publishing setpoints and the
+robot silently stops moving. Only the **state** topics
+(`/plc/velocity`, `/plc/axis_enable`, `/plc/emergency_stop`,
+`/plc/ros_alive`, `/plc/comm_state`) are deduped — they are latched
+state and rarely change.
+
 ### `config/robot.yaml` — Robot description
 
 Used by `trajectory_twin.py` (and the Isaac physics twin): joints, limits
 (`limits_deg`), Ruckig limits (`ruckig`), drive gains, and Isaac prim paths.
 `all_joints` includes the passive joint (`joint_5`); `controlled_joints` are
 the axes commanded by the PLC.
+
+### Terminal output
+
+`trajectory_twin.py` prints a column-aligned table once per second:
+
+    joint           cmd_deg    actual_deg     setpt_deg
+    --------------------------------------------------
+    joint_1           33.000        33.004        33.002
+    joint_2          -60.000       -59.981       -59.987
+    joint_3           66.000        66.006        66.003
+    joint_4            0.000        -0.000        -0.000
+
+`cmd_deg` comes from `/plc/cmd_ang`, `actual_deg` from `/joint_states`
+(feedback from the Isaac physics twin), and `setpt_deg` is the Ruckig
+output going to `/servo_setpoints`. All angles in degrees for readability;
+the published `JointState` messages still use radians, per ROS convention.
+
+`plc_ros_bridge.py` prints a `tick_stats` line every ~10 s:
+
+    tick_stats | ticks=600 slow=1 slow_pct=0.17 avg_slow_sock_ms=324.13 avg_slow_gap_ms=0.0
+
+- `slow_pct` should stay under 0.5% on a healthy host.
+- `avg_slow_gap_ms > 0` indicates GIL contention (bridge-side).
+- `avg_slow_sock_ms > 0` indicates real server-side stalls (not bridge-side).
 
 ---
 
@@ -356,6 +414,31 @@ Measured with `tools/latency_full_loop.py` (L2 + L3, after TCP-JSON optimization
 **Result:** 100% of full-loop samples stay under 20 ms. This is well within the control cycle for medium-speed industrial applications.
 
 See `docs/latency_comparison.md` for the full report.
+
+### Bridge Real-Time Behaviour
+
+Measured with the `tick_stats` diagnostic (60 Hz, 10 s window, `tcp_json` transport, TSC clocksource).
+
+| Metric                              | Value     | Notes                                  |
+| :---------------------------------- | :-------- | :------------------------------------- |
+| Effective tick rate                 | 60.0 Hz   | `ticks` increments by exactly 600/10 s |
+| Slow reads (>200 ms)                | 0–1 per 10 s | one per ~10 s, then zero              |
+| `slow_pct`                          | 0.00–0.17% | stabilizes under 0.1% after warm-up   |
+| Median read (`sock_ms`)             | 0.2 ms    | measured against the same server      |
+| Slow-read `gap_ms` (GIL wait)       | **0.0**   | after `SingleThreadedExecutor` fix     |
+| Slow-read `sock_ms` (socket wait)   | 219–406 ms | server-side cold-start stall           |
+
+**Interpretation:** after the GIL-contention fixes, the bridge sustains a genuine 60 Hz loop. The residual ~0.05% `slow_read` warnings are **server-side stalls**, not bridge-side timing artifacts. They are tolerated by `timeout: 1.5` and `watchdog_timeout: 4.0` and do not cause spurious e-stops or setpoint interruptions.
+
+For comparison, before the fixes:
+
+| Metric                              | Before    | After     |
+| :---------------------------------- | :-------- | :-------- |
+| Slow reads (>200 ms)                | ~5%       | <0.2%     |
+| Slow-read `gap_ms` (GIL wait)       | 200–1000 ms | 0.0 ms  |
+| Per-tick CPU (1 thread)             | ~3.3 ms   | <1 ms     |
+| Spurious e-stops from timeouts      | frequent  | none      |
+| Duplicate terminal lines            | yes (×2)  | no        |
 
 ### Clock Drift Calibration
 
@@ -421,12 +504,10 @@ Curve falls as `1/√τ` → white-noise behavior; clock is stable.
 
 **Correction model:**
 
-```
-offset(t) ≈ offset_at_t0 + drift × (t − t0)
-offset(t) ≈ 8,785,337.617 + 0.095728 × (t − t0)   [ms, t in seconds]
+    offset(t) ≈ offset_at_t0 + drift × (t − t0)
+    offset(t) ≈ 8,785,337.617 + 0.095728 × (t − t0)   [ms, t in seconds]
 
-local_time = peer_time − offset(t)
-```
+    local_time = peer_time − offset(t)
 
 **Achievable correction accuracy:** **±0.1 ms** over 5 minutes.
 
@@ -507,6 +588,22 @@ The platform can be tuned for different latency/robustness trade-offs.
 | Real-time priority | `sudo chrt -f 80 python3 plc_ros_bridge.py`    | -2 ms         |
 | CycloneDDS         | `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` | -1 ms         |
 
+### Bridge-Side Tuning (built in)
+
+These are already enabled by the current code and matter more than any external knob at 60 Hz:
+
+| Tuning | Effect |
+| :----- | :----- |
+| `SingleThreadedExecutor` | Eliminates GIL contention between timer and subscriber callbacks (was 200-1000 ms stalls) |
+| State-topic publish dedupe | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state |
+| `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive) |
+| Monotonic timing | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics |
+| `tick_stats` every 10 s | Separates `gap_ms` (bridge/GIL) from `sock_ms` (server) automatically |
+
+**If you still see `slow_read` after these:**
+- `gap_ms > 0` → bridge-side, check host CPU load (`top -H`, `taskset`)
+- `sock_ms > 0` → server-side, see `plc_server_win.py` — usually a ~10 s periodic task holding a lock or doing a slow fsync
+
 ### Transport Tuning
 
 **TCP-JSON:**
@@ -575,11 +672,26 @@ The platform can be tuned for different latency/robustness trade-offs.
 - [x] Fix: a persistent bad command no longer cancels an in-progress brake
 - [x] Fix: bridge no longer auto-clears the e-stop on PLC reconnect
 - [x] Clock drift characterization (physical + QEMU/KVM)
+- [x] **Bridge reaches clean 60 Hz**
+  - `SingleThreadedExecutor` eliminates GIL contention
+  - State-topic publish dedupe (~300 msg/s → <10 msg/s)
+  - Monotonic timing in all latency measurements
+  - `tick_stats` diagnostic splits `gap_ms` (GIL) from `sock_ms` (server)
+  - `TCP_NODELAY` set on `tcp_json` sockets
+  - `slow_pct` <0.2% sustained; residual stalls are server-side (~0.05%)
+- [x] **`trajectory_twin.py` terminal table**
+  - Side-by-side `cmd_deg` / `actual_deg` / `setpt_deg`, once per second
+  - File/JSONL log keeps compact single-line record with `position_deg`
+- [x] **Eliminate duplicate terminal lines** — `logging.to_ros: false`
+- [x] **Fix liveness semantics** — `/plc/cmd_ang` always republished;
+      only state topics are deduped
 
 ### In Progress
 
 - [ ] Unit tests for `plc_config` and `plc_drivers`
 - [ ] Yaskawa GP110 verification on this branch
+- [ ] Eliminate residual server-side stalls (~400 ms every ~10 s) —
+      needs `plc_server_win.py` instrumentation
 
 ### Planned
 

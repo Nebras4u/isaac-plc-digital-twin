@@ -9,22 +9,27 @@
 latency_probe: false
 
 plc:
-  driver: opcua               # opcua | tcp_json | plc_api
+  driver: tcp_json               # opcua | tcp_json | plc_api
 
   # ----- opcua -----
-  endpoint: opc.tcp://192.168.100.50:4840
-  timeout: 0.5
+  endpoint: opc.tcp://192.168.122.123:4840
   # user: "operator"
   # password: "secret"
 
   # ----- tcp_json -----
-  host: 192.168.100.18
+  host: 192.168.122.98
   port: 5000
 
   # ----- plc_api -----
-  instance: "ros2"
+  instance: "_ros2"
+
+  # Shared timeout for all drivers. 1.5 s is generous enough to survive
+  # the PLC server's occasional cold-start / reconnect stall, tight enough
+  # to surface a real link failure within one poll.
+  timeout: 1.5
 
 poll_hz: 60
+watchdog_timeout: 4.0
 
 # ==========================================================================
 # Structured logging
@@ -32,7 +37,7 @@ poll_hz: 60
 logging:
   level: INFO                # DEBUG | INFO | WARNING | ERROR
   console: true              # print to stdout
-  to_ros: true               # forward to ROS 2 logger
+  to_ros: false              # forward to ROS 2 logger (false = no duplicates)
   file: /workspace/plc_bridge_logs/bridge.log
   json_file: /workspace/plc_bridge_logs/bridge.jsonl
   max_bytes: 10485760        # 10 MB per file
