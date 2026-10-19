@@ -5,6 +5,7 @@
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-yellow)](https://www.python.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#control-loop-latency)
 [![Max](https://img.shields.io/badge/Max%20latency-16.3%20ms-success)](#control-loop-latency)
