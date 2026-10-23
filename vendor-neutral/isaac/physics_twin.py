@@ -2,8 +2,10 @@
 # Isaac Sim physics executor — vendor-neutral.
 # Reads robot definition from robot.yaml.
 #
-# Gravity compensation: enabled via ArticulationView (Isaac Sim 5.1 built-in).
-# Falls back to set_joint_efforts if the API is not available.
+# Gravity: kept ENABLED (real physics). Compensation is done implicitly
+# by high drive stiffness in robot.yaml. Isaac Sim 5.1 does not expose a
+# gravity compensation API on Articulation, so this is the only way to
+# preserve real physics while still tracking position targets accurately.
 
 import asyncio
 import sys
@@ -24,8 +26,16 @@ from pxr import UsdPhysics
 # Load robot definition
 # -------------------------------------------------------------------------
 ROBOT_CFG_FILE = "/workspace/robot.yaml"
-with open(ROBOT_CFG_FILE) as f:
-    _cfg = yaml.safe_load(f)["robot"]
+try:
+    with open(ROBOT_CFG_FILE) as f:
+        _loaded = yaml.safe_load(f)
+    if _loaded is None:
+        raise ValueError(f"robot.yaml is empty: {ROBOT_CFG_FILE}")
+    if "robot" not in _loaded:
+        raise KeyError(f"robot.yaml missing 'robot:' key")
+    _cfg = _loaded["robot"]
+except FileNotFoundError:
+    raise FileNotFoundError(f"robot.yaml not found at {ROBOT_CFG_FILE}")
 
 ROBOT_PATH  = _cfg["isaac_path"]
 ROBOT_SCOPE = _cfg["isaac_scope"]
@@ -36,9 +46,6 @@ JOINT_PATHS = {
     for k, v in _cfg["joint_paths"].items()
 }
 PUBLISH_HZ = 60.0
-
-# Gravity compensation mode: "builtin" | "efforts" | "off"
-GRAVITY_MODE = "builtin"
 
 
 # -------------------------------------------------------------------------
@@ -83,66 +90,20 @@ def configure_drives():
               f"D={params['damping']:.0f} F={params['max_force']:.0f}")
 
 
-def enable_gravity_compensation(robot):
-    """Enable gravity compensation on the articulation.
-    Tries the built-in API first (no conflict with position control).
-    Falls back to the efforts API if needed."""
-
-    if GRAVITY_MODE == "off":
-        print("Gravity compensation: DISABLED by config")
-        return False
-
-    # --- Try built-in gravity compensation on the articulation view ---
-    if GRAVITY_MODE == "builtin":
-        for method_name in (
-            "set_gravity_compensation",
-            "set_gravity_compensation_enabled",
-        ):
-            try:
-                view = getattr(robot, "_articulation_view", None)
-                if view is None:
-                    continue
-                method = getattr(view, method_name, None)
-                if method is None:
-                    continue
-                method(True)
-                print(f"Gravity compensation: ENABLED (builtin: {method_name})")
-                return True
-            except Exception as e:
-                print(f"  [try] {method_name}: {e}")
-                continue
-
-    # --- Fallback: apply gravity forces via efforts every step ---
-    if GRAVITY_MODE in ("builtin", "efforts"):
-        try:
-            gravity = robot.get_dof_gravity_compensation_forces()
-            if gravity is not None:
-                print("Gravity compensation: ENABLED (efforts fallback)")
-                return "efforts"
-        except Exception as e:
-            print(f"  [try] efforts fallback: {e}")
-
-    print("Gravity compensation: NOT AVAILABLE")
-    return False
-
-
 # -------------------------------------------------------------------------
 # ROS node
 # -------------------------------------------------------------------------
 class PhysicsTwin(Node):
-    def __init__(self, robot, gravity_status):
+    def __init__(self, robot):
         super().__init__("physics_twin")
         self.robot = robot
-        self.gravity_status = gravity_status
         self.latest_setpoint = None
         self._last_sp_t = 0.0
-        self._tag = ""          # latency-probe tag from trajectory_twin
-        self._applied_tag = ""  # tag of the setpoint last handed to physics
+        self._tag = ""
+        self._applied_tag = ""
+        self._pub_count = 0
+        self._needs_reinit = False
 
-        # Keep only the newest setpoint. rclpy.spin_once() below handles one
-        # message per Isaac frame; with the default depth of 10 and Isaac
-        # running slower than the 60 Hz publisher, the queue fills and the
-        # oldest (~10 periods old) setpoint is applied.
         sp_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
@@ -154,7 +115,7 @@ class PhysicsTwin(Node):
         self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
 
         self.get_logger().info(
-            f"PhysicsTwin ready. DOF={DOF_ORDER}. gravity={gravity_status}"
+            f"PhysicsTwin ready. DOF={DOF_ORDER}. gravity=ENABLED"
         )
 
     def on_setpoint(self, msg: JointState):
@@ -168,7 +129,12 @@ class PhysicsTwin(Node):
         if (time.monotonic() - self._last_sp_t) > 0.5:
             return
 
-        current = self.robot.get_joint_positions()
+        try:
+            current = self.robot.get_joint_positions()
+        except Exception as e:
+            print(f"[physics_twin] Articulation invalid: {e}")
+            self._needs_reinit = True
+            return
         if current is None:
             return
         current = current[0]
@@ -180,29 +146,28 @@ class PhysicsTwin(Node):
             else:
                 target[i] = float(current[i])
 
-        # 1) Position control
-        self.robot.set_joint_position_targets(
-            positions=target.reshape(1, -1),
-            joint_indices=list(range(len(DOF_ORDER))),
-        )
+        try:
+            self.robot.set_joint_position_targets(
+                positions=target.reshape(1, -1),
+                joint_indices=list(range(len(DOF_ORDER))),
+            )
+        except Exception as e:
+            print(f"[physics_twin] set_joint_position_targets failed: {e}")
+            self._needs_reinit = True
+            return
+
         self._applied_tag = self._tag
 
-        # 2) Gravity compensation (only if using "efforts" fallback)
-        if self.gravity_status == "efforts":
-            try:
-                gravity = self.robot.get_dof_gravity_compensation_forces()
-                if gravity is not None:
-                    self.robot.set_joint_efforts(
-                        efforts=gravity,
-                        joint_indices=list(range(len(DOF_ORDER))),
-                    )
-            except Exception:
-                pass
-
     def publish_states(self):
-        pos = self.robot.get_joint_positions()
+        try:
+            pos = self.robot.get_joint_positions()
+        except Exception as e:
+            print(f"[physics_twin] Articulation invalid in publish_states: {e}")
+            self._needs_reinit = True
+            return
         if pos is None:
             return
+
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = list(DOF_ORDER)
@@ -211,10 +176,22 @@ class PhysicsTwin(Node):
         msg.header.frame_id = f"{tag};{time.monotonic_ns()}" if tag else ""
         self.js_pub.publish(msg)
 
+        self._pub_count += 1
+        if self._pub_count % 600 == 0:
+            print(f"[physics_twin] gravity=ENABLED reinit_pending={self._needs_reinit}")
+
 
 # -------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------
+def _make_robot():
+    robot = Articulation(ROBOT_PATH)
+    robot.initialize()
+    if list(robot.dof_names) != DOF_ORDER:
+        print(f"!!! WARNING: DOF order mismatch: {robot.dof_names}")
+    return robot
+
+
 async def main():
     if not rclpy.ok():
         try:
@@ -223,29 +200,33 @@ async def main():
             pass
 
     print("=" * 60)
-    print("Initializing physics twin...")
+    print("Initializing physics twin (gravity ENABLED)...")
     print("=" * 60)
 
     inspect_limits()
     configure_drives()
 
     print("Initializing articulation...")
-    robot = Articulation(ROBOT_PATH)
-    robot.initialize()
+    robot = _make_robot()
     print(f"Articulation DOF names: {robot.dof_names}")
     print(f"Expected DOF_ORDER  : {DOF_ORDER}")
 
-    if list(robot.dof_names) != DOF_ORDER:
-        print("!!! WARNING: DOF order mismatch !!!")
-
-    # Enable gravity compensation
-    gravity_status = enable_gravity_compensation(robot)
-
-    node = PhysicsTwin(robot, gravity_status)
+    node = PhysicsTwin(robot)
     print("Entering main loop. Publishing /joint_states @ 60 Hz.")
 
     try:
         while True:
+            if node._needs_reinit:
+                print("[physics_twin] Reinitializing Articulation...")
+                try:
+                    node.robot = _make_robot()
+                    node._needs_reinit = False
+                    print("[physics_twin] Reinit OK")
+                except Exception as e:
+                    print(f"[physics_twin] Reinit failed: {e}")
+                    await omni.kit.app.get_app().next_update_async()
+                    continue
+
             node.step()
             node.publish_states()
             try:
@@ -254,17 +235,12 @@ async def main():
                 pass
             await omni.kit.app.get_app().next_update_async()
     finally:
-        # Runs when this task is cancelled (re-running the script) so the
-        # old node stops publishing /joint_states and consuming setpoints.
         try:
             node.destroy_node()
         except Exception:
             pass
 
 
-# Re-running this script in the Script Editor must not leave the previous
-# loop running: duplicate loops publish /joint_states several times and
-# fight over the same articulation targets.
 _prev = getattr(sys, "_physics_twin_task", None)
 if _prev is not None and not _prev.done():
     _prev.cancel()

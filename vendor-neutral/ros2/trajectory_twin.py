@@ -1,9 +1,6 @@
 # trajectory_twin.py
 # Vendor-neutral Ruckig-based trajectory generator.
 # Reads robot definition from robot.yaml.
-#
-# Logging: reuses bridge_logger.setup_logging for structured output
-# (human-readable + JSON Lines, with rotation).
 
 import math
 import os
@@ -14,6 +11,7 @@ import numpy as np
 import yaml
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
@@ -23,8 +21,50 @@ from bridge_logger import setup_logging
 IDLE, RUNNING, STOPPING = 0, 1, 2
 
 
+def _validate_limits(limits_deg, joints):
+    """Industrial sanity: lower < upper, plausible range."""
+    for j in joints:
+        if j not in limits_deg:
+            raise ValueError(f"robot.yaml: joint '{j}' missing limits_deg")
+        lim = limits_deg[j]
+        if not (isinstance(lim, (list, tuple)) and len(lim) == 2):
+            raise ValueError(
+                f"joint '{j}': limits_deg must be [lower, upper], got {lim!r}"
+            )
+        lo, hi = lim
+        if not (isinstance(lo, (int, float)) and isinstance(hi, (int, float))):
+            raise ValueError(
+                f"joint '{j}': limits must be numeric, got {lim!r}"
+            )
+        if lo >= hi:
+            raise ValueError(
+                f"joint '{j}': lower {lo}° >= upper {hi}° "
+                f"(limits are [lower, upper])"
+            )
+        if hi - lo > 720.0:
+            raise ValueError(
+                f"joint '{j}': range {hi - lo:.1f}° is implausibly large "
+                f"(>720°, check units)"
+            )
+
+
 class RuckigPlanner:
     def __init__(self, dof, control_hz, max_vel, max_acc, max_jerk, jump_threshold):
+        if not (0 < control_hz <= 1000):
+            raise ValueError(
+                f"ruckig.control_hz must be in (0, 1000], got {control_hz}"
+            )
+        if max_vel <= 0:
+            raise ValueError(f"ruckig.max_vel must be > 0, got {max_vel}")
+        if max_acc <= 0:
+            raise ValueError(f"ruckig.max_acc must be > 0, got {max_acc}")
+        if max_jerk <= 0:
+            raise ValueError(f"ruckig.max_jerk must be > 0, got {max_jerk}")
+        if jump_threshold <= 0:
+            raise ValueError(
+                f"ruckig.jump_threshold_rad must be > 0, got {jump_threshold}"
+            )
+
         self.dof = dof
         self.dt  = 1.0 / control_hz
         self.jump_threshold = jump_threshold
@@ -32,13 +72,10 @@ class RuckigPlanner:
         self.inp = InputParameter(dof)
         self.out = OutputParameter(dof)
 
-        # Normal-motion limits (from robot.yaml).
         self._max_vel  = max_vel
         self._max_acc  = max_acc
         self._max_jerk = max_jerk
 
-        # Aggressive braking profile: stop as fast as mechanically
-        # reasonable when estop / disable fires.
         self._brake_acc  = max_acc  * 4.0
         self._brake_jerk = max_jerk * 8.0
 
@@ -60,7 +97,6 @@ class RuckigPlanner:
         self.inp.current_acceleration = [0.0] * self.dof
         self.inp.target_velocity      = [0.0] * self.dof
         self.inp.target_acceleration  = [0.0] * self.dof
-        # Restore normal-motion limits.
         self.inp.max_velocity     = [self._max_vel]  * self.dof
         self.inp.max_acceleration = [self._max_acc]  * self.dof
         self.inp.max_jerk         = [self._max_jerk] * self.dof
@@ -71,7 +107,8 @@ class RuckigPlanner:
 
     def set_target(self, t):
         t = np.asarray(t, dtype=np.float64)
-        if not np.all(np.isfinite(t)): return False
+        if not np.all(np.isfinite(t)):
+            return False
         self.inp.target_position = t.tolist()
         self._has_target = True
         return True
@@ -88,13 +125,13 @@ class RuckigPlanner:
         self.inp.control_interface = ControlInterface.Velocity
         self.inp.target_velocity = [0.0] * self.dof
         self.inp.target_acceleration = [0.0] * self.dof
-        # Switch to the aggressive braking profile.
         self.inp.max_acceleration = [self._brake_acc]  * self.dof
         self.inp.max_jerk         = [self._brake_jerk] * self.dof
         self._stopped = False
 
     def step(self):
-        if not self._initialized: return None
+        if not self._initialized:
+            return None
         braking = self.inp.control_interface == ControlInterface.Velocity
         if not braking and not self._has_target:
             return np.array(self.inp.current_position)
@@ -102,14 +139,17 @@ class RuckigPlanner:
         if res not in (Result.Working, Result.Finished):
             self.inp.current_velocity     = [0.0] * self.dof
             self.inp.current_acceleration = [0.0] * self.dof
-            if braking: self._stopped = True
+            if braking:
+                self._stopped = True
             return np.array(self.inp.current_position)
         self.out.pass_to_input(self.inp)
-        if braking and res == Result.Finished: self._stopped = True
+        if braking and res == Result.Finished:
+            self._stopped = True
         return np.array(self.out.new_position)
 
     @property
-    def stopped(self): return self._stopped
+    def stopped(self):
+        return self._stopped
 
 
 class TrajectoryTwin(Node):
@@ -123,6 +163,9 @@ class TrajectoryTwin(Node):
         self.all_joints = cfg["all_joints"]
         self.controlled_joints = cfg["controlled_joints"]
         self.limits_deg = cfg["limits_deg"]
+
+        _validate_limits(self.limits_deg, self.controlled_joints)
+
         self.dof = len(self.all_joints)
         self.name_to_idx = {n: i for i, n in enumerate(self.all_joints)}
 
@@ -132,7 +175,6 @@ class TrajectoryTwin(Node):
             r["max_jerk"], r["jump_threshold_rad"],
         )
 
-        # ---- structured logging ----
         log_cfg = {"logging": cfg.get("logging", {})} if "logging" in cfg else {
             "logging": {
                 "level": "INFO",
@@ -156,7 +198,10 @@ class TrajectoryTwin(Node):
         self._has_actual = False
         self._last_js_t = 0.0
         self._enable = False
-        self._estop = False
+        # Start with estop active — safe default. Until the bridge
+        # publishes its first estop=False (via TRANSIENT_LOCAL, this
+        # happens immediately after subscription), we assume e-stop.
+        self._estop = True
         self._cmd_deg = [0.0] * len(self.controlled_joints)
         self._cmd_ok = False
         self._last_cmd_t = 0.0
@@ -164,19 +209,30 @@ class TrajectoryTwin(Node):
         self._msg = JointState()
         self._msg.name = list(self.all_joints)
 
-        # ---- logging state (throttling) ----
         self._last_setpoint_log = 0.0
         self._cmd_timeout_logged = False
         self._no_feedback_logged = False
         self._estop_logged = False
         self._last_cmd_logged = None
         self._bad_cmd_logged = False
-        self._cmd_tag = ""   # latency-probe tag from the bridge (optional)
+        self._cmd_tag = ""
+
+        # TRANSIENT_LOCAL: a node that starts after the publisher still
+        # receives the last estop value. Without this, a late-starting
+        # trajectory_twin would never see estop=False.
+        state_qos = QoSProfile(
+            depth=1,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        )
 
         self.create_subscription(JointState, "/joint_states", self.on_js, 10)
         self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, 10)
-        self.create_subscription(Bool, "/plc/axis_enable", self.on_enable, 10)
-        self.create_subscription(Bool, "/plc/emergency_stop", self.on_estop, 10)
+        self.create_subscription(
+            Bool, "/plc/axis_enable", self.on_enable, state_qos
+        )
+        self.create_subscription(
+            Bool, "/plc/emergency_stop", self.on_estop, state_qos
+        )
         self.create_timer(1.0 / r["control_hz"], self.servo_tick)
 
         self.log.info(
@@ -189,12 +245,12 @@ class TrajectoryTwin(Node):
             },
         )
 
-    # ------------------------------------------------------------------
     def on_js(self, msg):
         with self.lock:
             for n, p in zip(msg.name, msg.position):
                 i = self.name_to_idx.get(n)
-                if i is not None: self._actual[i] = float(p)
+                if i is not None:
+                    self._actual[i] = float(p)
             self._has_actual = True
             self._last_js_t = time.monotonic()
 
@@ -243,7 +299,8 @@ class TrajectoryTwin(Node):
             idx = self.name_to_idx[j]
             deg = cmd_deg[i]
             lo, hi = self.limits_deg[j]
-            if not math.isfinite(deg) or deg < lo or deg > hi: return None
+            if not math.isfinite(deg) or deg < lo or deg > hi:
+                return None
             t[idx] = math.radians(deg)
         return t
 
@@ -254,7 +311,6 @@ class TrajectoryTwin(Node):
             last_cmd_t = self._last_cmd_t
         fresh, actual = self.get_feedback()
 
-        # ---- watchdog: cmd_ang must arrive within 0.5 s ----
         if (time.monotonic() - last_cmd_t) > 0.5:
             if cmd_ok and not self._cmd_timeout_logged:
                 self.log.warning(
@@ -266,7 +322,6 @@ class TrajectoryTwin(Node):
         else:
             self._cmd_timeout_logged = False
 
-        # ---- no feedback watchdog ----
         if not fresh and self._has_actual:
             if not self._no_feedback_logged:
                 self.log.error(
@@ -279,9 +334,6 @@ class TrajectoryTwin(Node):
 
         want_run = enable and (not estop) and fresh and cmd_ok
 
-        # While STOPPING, the brake always runs to completion (handled at the
-        # bottom). A restart is only possible from IDLE, so a persistent bad
-        # command can never cancel a brake in progress.
         if want_run and self._state != STOPPING:
             target = self.build_target(cmd, actual)
             if target is None:
@@ -297,7 +349,6 @@ class TrajectoryTwin(Node):
                     )
                 if self._state == RUNNING:
                     self._begin_brake("bad command")
-                # IDLE + bad command: stay idle, do not start.
             else:
                 self._bad_cmd_logged = False
                 if self._state == IDLE:
@@ -312,18 +363,24 @@ class TrajectoryTwin(Node):
                 else:
                     self.planner.sync_state(actual)
                     sp = self.planner.step()
-                    if sp is not None: self.publish(sp, cmd, actual)
+                    if sp is not None:
+                        self.publish(sp, cmd, actual)
         elif (not want_run) and self._state == RUNNING:
             reason = "fault or disable"
-            if estop: reason = "estop"
-            elif not enable: reason = "disable"
-            elif not fresh: reason = "no feedback"
-            elif not cmd_ok: reason = "cmd timeout"
+            if estop:
+                reason = "estop"
+            elif not enable:
+                reason = "disable"
+            elif not fresh:
+                reason = "no feedback"
+            elif not cmd_ok:
+                reason = "cmd timeout"
             self._begin_brake(reason)
 
         if self._state == STOPPING:
             sp = self.planner.step()
-            if sp is not None: self.publish(sp, cmd, actual)
+            if sp is not None:
+                self.publish(sp, cmd, actual)
             if self.planner.stopped:
                 self.log.info("state_changed",
                               extra={"from": "STOPPING", "to": "IDLE"})
@@ -341,10 +398,6 @@ class TrajectoryTwin(Node):
         if now - self._last_setpoint_log >= 1.0:
             self._last_setpoint_log = now
 
-            # Terminal-only column-aligned table:
-            #   cmd_deg    = target from /plc/cmd_ang
-            #   actual_deg = measured from /joint_states
-            #   diff_deg   = cmd_deg - actual_deg (tracking error)
             lines = [f"{'joint':<10}{'cmd_deg':>12}{'actual_deg':>14}{'diff_deg':>14}",
                      "-" * 50]
             for i, j in enumerate(self.controlled_joints):
@@ -384,8 +437,10 @@ def main():
         pass
     finally:
         node.destroy_node()
-        try: rclpy.shutdown()
-        except Exception: pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

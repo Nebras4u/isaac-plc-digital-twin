@@ -1,0 +1,15 @@
+cd /workspace
+cat > requirements-dev.txt << 'EOF'
+# Production
+pydantic>=2.0,<3
+PyYAML>=6.0
+
+# Test
+pytest>=7.0
+pytest-cov>=4.0
+
+# Optional (ruckig needs platform wheel)
+# ruckig>=0.19
+# asyncua>=2.1
+EOF
+cat requirements-dev.txt

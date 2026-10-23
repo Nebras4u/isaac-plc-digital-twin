@@ -2,7 +2,7 @@
 # Change this file to switch robot. No Python changes needed.
 
 robot:
-  name: KUKA_KR210_L150_L
+  name: kr210_l150
   description: "KUKA KR210 L150 L — 4 controlled axes + 1 passive"
 
   all_joints:        [joint_1, joint_2, joint_3, joint_5, joint_4]
@@ -32,16 +32,16 @@ robot:
     jump_threshold_rad: 0.30
 
   drives:
-    joint_1: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
-    joint_2: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
-    joint_3: {stiffness: 1000000.0, damping: 100000.0, max_force: 50000000.0}
-    joint_4: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}
-    joint_5: {stiffness:  200000.0, damping:  20000.0, max_force:  5000000.0}
+    joint_1: {stiffness: 1000000.0,  damping: 100000.0,  max_force: 50000000.0}
+    joint_2: {stiffness: 50000000.0, damping: 5000000.0, max_force: 1000000000.0}
+    joint_3: {stiffness: 50000000.0, damping: 5000000.0, max_force: 1000000000.0}
+    joint_4: {stiffness:  200000.0,  damping:  20000.0,  max_force:  5000000.0}
+    joint_5: {stiffness:  200000.0,  damping:  20000.0,  max_force:  5000000.0}
 
   logging:
     level: INFO
     console: true
-    to_ros: true
+    to_ros: false
     file: /workspace/plc_bridge_logs/trajectory.log
     json_file: /workspace/plc_bridge_logs/trajectory.jsonl
     max_bytes: 10485760

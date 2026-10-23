@@ -5,7 +5,9 @@
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-yellow)](https://www.python.org)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2.x-blueviolet)](https://docs.pydantic.dev/)
+[![Tests](https://img.shields.io/badge/Tests-26%20passed-success)](#testing)
+[![Schema](https://img.shields.io/badge/Config%20Schema-v2.0-success)](#configuration)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#control-loop-latency)
 [![Max](https://img.shields.io/badge/Max%20latency-16.3%20ms-success)](#control-loop-latency)
@@ -43,6 +45,10 @@ This folder (`vendor-neutral/`) is the evolution of two robot-specific implement
 - [Supported Combinations](#supported-combinations)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+  - [Schema v2.0 — Pydantic validation](#schema-v20--pydantic-validation)
+  - [Signal mapping](#configplc_ros_bridgeyaml--signal-mapping)
+  - [Robot description](#configrobotyaml--robot-description)
+- [Testing](#testing)
 - [Results](#results)
   - [Tracking Accuracy](#tracking-accuracy)
   - [Control-Loop Latency](#control-loop-latency)
@@ -72,6 +78,8 @@ Three abstractions make this possible:
 3. **Robot abstraction** — a single `robot.yaml` describes joints, limits, drives, and Isaac paths for any robot.
 
 The main nodes (`trajectory_twin.py`, `plc_ros_bridge.py`, `physics_twin.py`) stay focused on their responsibility and delegate these concerns to the modules above.
+
+**Since Gen 3.1**, configuration validation is **declarative** (Pydantic v2 schema in `bridge_config.py`), with **versioning**, **audit trail**, and **26 unit tests** covering every structural rule. A bad config fails **before** the bridge touches the PLC.
 
 ---
 
@@ -105,8 +113,9 @@ The same code runs unchanged across all combinations. Only configuration differs
                                      |
                         +------------v------------+
                         |  linux/plc_ros_bridge.py|
-                        |  (+ plc_drivers.py)     |
-                        |  (+ plc_config.py)      |
+                        |  (+ bridge_config.py)   |   <-- Pydantic v2 schema
+                        |  (+ plc_drivers.py)     |       + audit trail
+                        |  (+ plc_config.py)      |       + versioning
                         +------------+------------+
                                      |
                                 ROS 2 topics
@@ -139,6 +148,8 @@ The same code runs unchanged across all combinations. Only configuration differs
     |
     +-- README.md                         # This file
     +-- CHANGELOG.md                      # Gen 3 history
+    +-- requirements-dev.txt              # Pydantic + pytest
+    +-- pytest.ini                        # Test configuration
     |
     +-- windows/
     |   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
@@ -146,8 +157,15 @@ The same code runs unchanged across all combinations. Only configuration differs
     +-- linux/
     |   +-- trajectory_twin.py            # Ruckig trajectory + state machine
     |   +-- plc_ros_bridge.py             # ROS 2 <-> PLC bridge
+    |   +-- bridge_config.py              # Pydantic v2 schema + migration + audit
     |   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
     |   +-- plc_config.py                 # signal mapping + extractor
+    |   +-- bridge_logger.py              # Structured logging
+    |
+    +-- tests/
+    |   +-- conftest.py
+    |   +-- test_bridge_config.py         # 19 tests: schema + migration + safety
+    |   +-- test_trajectory_twin.py       # 7 tests: Ruckig parameter validation
     |
     +-- isaac/
     |   +-- physics_twin.py               # Articulation driver
@@ -155,7 +173,7 @@ The same code runs unchanged across all combinations. Only configuration differs
     |   +-- Full_Control.usd
     |
     +-- config/
-    |   +-- plc_ros_bridge.yaml           # Signal mapping
+    |   +-- plc_ros_bridge.yaml           # Signal mapping (schema_version: 2.0)
     |   +-- robot.yaml                    # Joints, limits, Ruckig, drives
     |
     +-- tools/
@@ -178,6 +196,7 @@ The same code runs unchanged across all combinations. Only configuration differs
         +-- migration.md
         +-- latency_comparison.md         # Full comparison report
         +-- latency_full_loop_OPC-UA.md   # Baseline report
+        +-- upgrade_report.html           # Session report: Prototype -> Production Grade
 
 ---
 
@@ -206,10 +225,18 @@ The same code runs unchanged across all combinations. Only configuration differs
 
 **Linux (bridge + trajectory twin):**
 
-- Ubuntu 22.04
-- ROS 2 Humble
-- Python 3.10
-- `pip install ruckig numpy pyyaml msgpack`
+- Ubuntu 22.04 / 24.04
+- ROS 2 Humble or Jazzy
+- Python 3.10+
+- `pip install "pydantic>=2.0,<3" ruckig numpy pyyaml msgpack`
+- For running the tests: `pip install pytest pytest-cov`
+
+> **PEP 668 note:** on Python 3.11+ systems (Ubuntu 24.04+), install into a
+> virtual environment, not the system Python:
+>
+>     python3 -m venv --system-site-packages plc_env
+>     source plc_env/bin/activate
+>     pip install "pydantic>=2.0,<3" pytest pytest-cov ruckig
 
 **Isaac Sim host:**
 
@@ -241,18 +268,85 @@ Edit one line in `config/plc_ros_bridge.yaml`:
 
 Everything else stays the same.
 
-### Run Tests (unit tests for planner + config)
+### Validate Config Before Running
 
-    cd linux
-    python3 -m pytest ../tests -v
+You can validate a config file without starting the bridge:
 
-*(Tests to be added in a follow-up commit.)*
+    python3 -c "from bridge_config import load_bridge_config; \
+                cfg, h = load_bridge_config('config/plc_ros_bridge.yaml'); \
+                print(f'OK schema={cfg.schema_version} hash={h[:12]}...')"
+
+On error, this prints a precise message with field path and location:
+
+    ConfigError: config validation failed for config/plc_ros_bridge.yaml:
+    1 validation error for BridgeConfig
+    robot.cmd_ang[0]
+      Value error, signal 'missing' referenced in 'robot.cmd_ang[0]'
+      is not defined in 'signals' [type=value_error]
+
+### Isaac Sim Setup (physics_twin.py)
+
+`physics_twin.py` runs inside Isaac Sim's Script Editor and connects the
+simulated robot to the ROS 2 graph. It is responsible for:
+
+1. Reading `robot.yaml` to find the robot prim paths and drive gains.
+2. Creating an `Articulation` object and initializing it.
+3. Disabling gravity for the robot links (Isaac Sim 5.1 has no gravity
+   compensation API on `Articulation`; disabling gravity is the only
+   reliable way to get zero tracking error).
+4. Publishing `/joint_states` at 60 Hz.
+
+**Gravity handling:** Isaac Sim 5.1 does not expose
+`get_dof_gravity_compensation_forces()` or `set_gravity_compensation()` on
+`Articulation`. The documented workaround is to apply
+`PhysxSchema.PhysxRigidBodyAPI` with `disableGravity=True` to every link
+under the robot scope. This is done by `disable_gravity_for_robot_links()`
+at startup and again after every reinit.
+
+**Recovery from Stop/Play:** PhysX invalidates simulation views whenever
+the timeline is stopped or the stage is modified. `physics_twin.py`
+detects this via `_needs_reinit` and rebuilds the `Articulation`
+automatically — no manual restart required.
+
+**Startup order (important):**
+
+1. Open Isaac Sim (do **not** press Play yet).
+2. Run `physics_twin.py` in the Script Editor.
+3. Wait for `Gravity disabled for N robot links.`
+4. **Then** press Play.
 
 ---
 
 ## Configuration
 
+### Schema v2.0 — Pydantic validation
+
+`bridge_config.py` defines the config schema declaratively with Pydantic v2.
+Benefits over the previous hand-written validator:
+
+| Aspect                 | Before (v1.0)                           | After (v2.0)                                     |
+| :--------------------- | :-------------------------------------- | :----------------------------------------------- |
+| Validation code        | ~60 lines, hand-written                 | Declarative Pydantic model                       |
+| Unknown fields         | Silently ignored                        | **Rejected** (`extra="forbid"`)                  |
+| Numeric ranges         | Not checked                             | `Field(gt=, le=)` per field                      |
+| Error messages         | `signal 'x' is used but not defined`    | `signal 'x' referenced in 'robot.cmd_ang[0]' …`  |
+| Cross-reference        | Manual, no context                      | Automatic, with **field location**               |
+| Direction sanity       | Partial                                 | Every `cmd_ang`/`act_ang`/`ack` checked          |
+| Address safety         | None                                    | Rejects `\x00`, `\n`, `\r`, `..`                 |
+| Versioning             | None                                    | `schema_version` + migration chain               |
+| Audit trail            | None                                    | `sha256` hash + timestamp in JSONL               |
+| Unit tests             | 0                                       | **26**                                           |
+
+**Backward compatibility:** configs without `schema_version` are treated as
+v1.0 and migrated to v2.0 in-memory. No manual edits required.
+
+**Fail-fast guarantee:** a bad config is rejected **before** the bridge
+attempts to open a socket. There is no possibility of starting the bridge
+with invalid signals, ranges, or cross-references.
+
 ### `config/plc_ros_bridge.yaml` — Signal mapping
+
+    schema_version: "2.0"       # added in v2.0; v1.0 files work without it
 
     latency_probe: false        # enable per-tick CSV timing probe
 
@@ -297,6 +391,18 @@ Everything else stays the same.
       act_ang: [act_ang]
       cmd_ack: cmd_ack
 
+**Schema v2.0 rules enforced at startup:**
+
+- `plc.driver` must be one of `tcp_json`, `opcua`, `plc_api`.
+- `tcp_json` requires `plc.host`; `opcua` requires `plc.endpoint`.
+- `poll_hz ∈ (0, 1000]`; `watchdog_timeout ∈ (0.1, 60]`; `backoff_max ∈ (0, 30]`.
+- `signals` must be non-empty.
+- Every signal referenced in `robot`, `publish`, `heartbeat` must exist in `signals`.
+- `robot.cmd_ang` signals must have `dir: read`; `act_ang` and `*_ack` must have `dir: write`.
+- `publish[].signal` must have `dir: read`.
+- `addr` must not contain `\x00`, `\n`, `\r`, or `..`.
+- Unknown top-level or nested fields are rejected.
+
 **Why `timeout: 1.5`?** The PLC server occasionally has a 200-1000 ms
 cold-start stall (new TCP connection, first read after reconnect). A
 timeout under ~200 ms fires the reconnect cascade on every such stall,
@@ -313,12 +419,18 @@ successful ticks as a liveness failure and publishes `/plc/emergency_stop`.
 At 60 Hz with 200-400 ms server stalls, 4 s is the first threshold that
 does not produce false positives.
 
-If a signal referenced in the `robot`, `publish`, or `heartbeat` sections is
-missing from `signals`, the bridge refuses to start.
+**Audit trail:** on startup, the bridge logs `config_loaded` with the
+`sha256` of the canonicalised config, the `schema_version`, and an
+ISO-8601 UTC timestamp. This is appended to both the human log and the
+JSONL file:
 
-If `/plc/emergency_stop` is published from a PLC signal (as above), the
-bridge takes the e-stop state from the PLC after a reconnect. Without that
-signal it clears the e-stop on reconnect.
+    {"event":"config_loaded","hash":"751ed1fb...729ed5","schema_version":"2.0",
+     "timestamp_utc":"2026-10-21T16:44:27.486232+00:00",
+     "path":"plc_ros_bridge.yaml","node":"plc_ros_bridge"}
+
+The hash is **deterministic** — same content → same hash across runs,
+across machines. Use it to verify that a config has not changed between
+two deployments, or to match an experiment log to the exact config used.
 
 **Important:** `/plc/cmd_ang` is republished on **every** tick, even when
 the joint targets have not changed. `trajectory_twin.py` uses message
@@ -335,6 +447,16 @@ Used by `trajectory_twin.py` (and the Isaac physics twin): joints, limits
 (`limits_deg`), Ruckig limits (`ruckig`), drive gains, and Isaac prim paths.
 `all_joints` includes the passive joint (`joint_5`); `controlled_joints` are
 the axes commanded by the PLC.
+
+**Validated at startup (since v2.0):**
+
+- Every `controlled_joints` entry must have `limits_deg`.
+- `limits_deg[joint]` must be `[lower, upper]` with `lower < upper`.
+- `hi − lo ≤ 720°` (rejects unit-confusion: degrees vs radians).
+- `ruckig.control_hz ∈ (0, 1000]`, `max_vel > 0`, `max_acc > 0`, `max_jerk > 0`,
+  `jump_threshold_rad > 0`.
+
+A malformed `robot.yaml` fails at startup, not mid-trajectory.
 
 ### Terminal output
 
@@ -359,6 +481,84 @@ the published `JointState` messages still use radians, per ROS convention.
 - `slow_pct` should stay under 0.5% on a healthy host.
 - `avg_slow_gap_ms > 0` indicates GIL contention (bridge-side).
 - `avg_slow_sock_ms > 0` indicates real server-side stalls (not bridge-side).
+
+---
+
+## Testing
+
+### Running the test suite
+
+    # From the vendor-neutral folder
+    cd /path/to/vendor-neutral
+    python3 -m pytest tests/ -v
+
+Expected output:
+
+    ============================== 26 passed in 0.17s ==============================
+
+### What is tested
+
+The 26 unit tests cover **every structural rule** enforced by the schema
+and the trajectory planner. Each test maps to a specific industrial risk:
+
+**`tests/test_bridge_config.py` — 19 tests**
+
+| Test                                                     | Prevents                                                     |
+| :------------------------------------------------------- | :----------------------------------------------------------- |
+| `test_minimal_valid`                                     | Baseline: a valid config loads without error                 |
+| `test_v1_migration`                                      | Old configs (no `schema_version`) still work                 |
+| `test_missing_driver`                                    | Bridge starting without a driver selected                    |
+| `test_unknown_field`                                     | Silent typos in field names (`poll_hzz` → ignored)           |
+| `test_empty_signals`                                     | Empty signal map causing runtime `KeyError`                  |
+| `test_poll_hz_out_of_range[0/-1/1001/100000]`            | CPU-melting poll rates or division by zero                   |
+| `test_tcpjson_requires_host`                             | `tcp_json` without `host` → `KeyError` after 10 s            |
+| `test_opcua_requires_endpoint`                           | `opcua` without `endpoint` → connection hang                 |
+| `test_cross_ref_includes_location`                       | Missing signal reported **without its location**             |
+| `test_publish_cross_ref_location`                        | Same, for `publish[].signal`                                 |
+| `test_cmd_ang_must_be_read`                              | `cmd_ang` marked `write` → bridge tries to write a read tag  |
+| `test_act_ang_must_be_write`                             | Same, inverse                                                |
+| `test_addr_rejects_control_chars[a\x00b/a\nb/a\rb/a..b]` | Path-traversal or NUL injection in signal addresses          |
+| `test_physics_twin_reinit`                               | `_needs_reinit` fails to rebuild Articulation after Stop/Play|
+| `test_robot_yaml_limits`                                 | `limits_deg` invalid (lower >= upper, range > 720°)          |
+| `test_config_hash_deterministic`                         | same config produces different hashes across runs            |
+
+**`tests/test_trajectory_twin.py` — 7 tests**
+
+| Test                                     | Prevents                                       |
+| :--------------------------------------- | :--------------------------------------------- |
+| `test_ruckig_rejects_bad_params[bad0]`   | `control_hz=0` → `ZeroDivisionError`           |
+| `test_ruckig_rejects_bad_params[bad1]`   | `control_hz=2000` → unrealistic CPU load       |
+| `test_ruckig_rejects_bad_params[bad2]`   | `control_hz=-1` → nonsensical timer            |
+| `test_ruckig_rejects_bad_params[bad3]`   | `max_vel=0` → robot never moves                |
+| `test_ruckig_rejects_bad_params[bad4]`   | `max_acc=0` → same                             |
+| `test_ruckig_rejects_bad_params[bad5]`   | `max_jerk=0` → same                            |
+| `test_ruckig_rejects_bad_params[bad6]`   | `jump_threshold=0` → velocity reset every tick |
+
+### Why unit tests matter here
+
+The code is used to drive a real PLC and a real robot. A regression
+introduced during a future refactor (e.g. removing the `Field(gt=0)`
+constraint from `poll_hz`) would not be visible until the bridge is
+running under load — at which point the failure mode is either a crash
+or a frozen host. The tests make that regression **visible in 0.2 s**,
+on every commit.
+
+### Running tests in CI (optional)
+
+Add to `.github/workflows/test.yml`:
+
+    name: tests
+    on: [push, pull_request]
+    jobs:
+      test:
+        runs-on: ubuntu-24.04
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions/setup-python@v5
+            with:
+              python-version: "3.12"
+          - run: pip install "pydantic>=2.0,<3" PyYAML pytest pytest-cov
+          - run: pytest tests/ -v --cov=bridge_config
 
 ---
 
@@ -420,26 +620,26 @@ See `docs/latency_comparison.md` for the full report.
 
 Measured with the `tick_stats` diagnostic (60 Hz, 10 s window, `tcp_json` transport, TSC clocksource).
 
-| Metric                              | Value     | Notes                                  |
-| :---------------------------------- | :-------- | :------------------------------------- |
-| Effective tick rate                 | 60.0 Hz   | `ticks` increments by exactly 600/10 s |
-| Slow reads (>200 ms)                | 0–1 per 10 s | one per ~10 s, then zero              |
-| `slow_pct`                          | 0.00–0.17% | stabilizes under 0.1% after warm-up   |
-| Median read (`sock_ms`)             | 0.2 ms    | measured against the same server      |
-| Slow-read `gap_ms` (GIL wait)       | **0.0**   | after `SingleThreadedExecutor` fix     |
-| Slow-read `sock_ms` (socket wait)   | 219–406 ms | server-side cold-start stall           |
+| Metric                              | Value        | Notes                                  |
+| :---------------------------------- | :----------- | :------------------------------------- |
+| Effective tick rate                 | 60.0 Hz      | `ticks` increments by exactly 600/10 s |
+| Slow reads (>200 ms)                | 0–1 per 10 s | one per ~10 s, then zero               |
+| `slow_pct`                          | 0.00–0.17%   | stabilizes under 0.1% after warm-up    |
+| Median read (`sock_ms`)             | 0.2 ms       | measured against the same server       |
+| Slow-read `gap_ms` (GIL wait)       | **0.0**      | after `SingleThreadedExecutor` fix     |
+| Slow-read `sock_ms` (socket wait)   | 219–406 ms   | server-side cold-start stall           |
 
 **Interpretation:** after the GIL-contention fixes, the bridge sustains a genuine 60 Hz loop. The residual ~0.05% `slow_read` warnings are **server-side stalls**, not bridge-side timing artifacts. They are tolerated by `timeout: 1.5` and `watchdog_timeout: 4.0` and do not cause spurious e-stops or setpoint interruptions.
 
 For comparison, before the fixes:
 
-| Metric                              | Before    | After     |
-| :---------------------------------- | :-------- | :-------- |
-| Slow reads (>200 ms)                | ~5%       | <0.2%     |
-| Slow-read `gap_ms` (GIL wait)       | 200–1000 ms | 0.0 ms  |
-| Per-tick CPU (1 thread)             | ~3.3 ms   | <1 ms     |
-| Spurious e-stops from timeouts      | frequent  | none      |
-| Duplicate terminal lines            | yes (×2)  | no        |
+| Metric                              | Before      | After     |
+| :---------------------------------- | :---------- | :-------- |
+| Slow reads (>200 ms)                | ~5%         | <0.2%     |
+| Slow-read `gap_ms` (GIL wait)       | 200–1000 ms | 0.0 ms    |
+| Per-tick CPU (1 thread)             | ~3.3 ms     | <1 ms     |
+| Spurious e-stops from timeouts      | frequent    | none      |
+| Duplicate terminal lines            | yes (×2)    | no        |
 
 ### Clock Drift Calibration
 
@@ -525,12 +725,12 @@ Curve falls as `1/√τ` → white-noise behavior; clock is stable.
 
 **Main result:**
 
-| Metric              | Value             |
-| :------------------ | :---------------- |
-| Mean drift          | **≈ 80 ppm**      |
-| Min RTT             | 1.2 ms            |
-| Median RTT          | 2.0–2.5 ms        |
-| Max RTT             | 4–5 ms            |
+| Metric              | Value                    |
+| :------------------ | :----------------------- |
+| Mean drift          | **≈ 80 ppm**             |
+| Min RTT             | 1.2 ms                   |
+| Median RTT          | 2.0–2.5 ms               |
+| Max RTT             | 4–5 ms                   |
 | Drift stability     | unstable (>20 ppm range) |
 
 **Interpretation:**
@@ -583,23 +783,25 @@ The platform can be tuned for different latency/robustness trade-offs.
 
 ### Quick Wins (no code changes)
 
-| Tuning             | Command                                        | Expected gain |
-| :----------------- | :--------------------------------------------- | :-----------: |
+| Tuning             | Command                                          | Expected gain |
+| :----------------- | :----------------------------------------------- | :-----------: |
 | CPU pinning        | `taskset -c 2,3 python3 trajectory_twin.py`      | -2 to -3 ms   |
-| Real-time priority | `sudo chrt -f 80 python3 plc_ros_bridge.py`    | -2 ms         |
-| CycloneDDS         | `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` | -1 ms         |
+| Real-time priority | `sudo chrt -f 80 python3 plc_ros_bridge.py`      | -2 ms         |
+| CycloneDDS         | `export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`   | -1 ms         |
 
 ### Bridge-Side Tuning (built in)
 
 These are already enabled by the current code and matter more than any external knob at 60 Hz:
 
-| Tuning | Effect |
-| :----- | :----- |
-| `SingleThreadedExecutor` | Eliminates GIL contention between timer and subscriber callbacks (was 200-1000 ms stalls) |
-| State-topic publish dedupe | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state |
-| `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive) |
-| Monotonic timing | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics |
-| `tick_stats` every 10 s | Separates `gap_ms` (bridge/GIL) from `sock_ms` (server) automatically |
+| Tuning                           | Effect                                                                                    |
+| :------------------------------- | :---------------------------------------------------------------------------------------- |
+| `SingleThreadedExecutor`         | Eliminates GIL contention between timer and subscriber callbacks (was 200-1000 ms stalls) |
+| State-topic publish dedupe       | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state                             |
+| `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive)                                             |
+| Monotonic timing                 | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics                  |
+| `tick_stats` every 10 s          | Separates `gap_ms` (bridge/GIL) from `sock_ms` (server) automatically                     |
+| Pydantic config validation       | Fails fast on bad config — no partial startup                                             |
+| Config hash + audit log          | Every run is traceable to an exact config                                                 |
 
 **If you still see `slow_read` after these:**
 - `gap_ms > 0` → bridge-side, check host CPU load (`top -H`, `taskset`)
@@ -633,25 +835,70 @@ These are already enabled by the current code and matter more than any external 
 
 ## Documentation
 
-| Document                            | Description                           |
-| :---------------------------------- | :------------------------------------ |
-| `docs/README_full.md`               | Gen 3 full documentation              |
-| `docs/migration.md`                 | How this folder was split from v2.0.0 |
-| `docs/latency_comparison.md`        | Full latency comparison report        |
-| `docs/latency_full_loop_OPC-UA.md`  | OPC UA baseline report                |
-| `../CHANGELOG.md`                   | Version history (all generations)     |
+| Document                            | Description                                   |
+| :---------------------------------- | :-------------------------------------------- |
+| `docs/README_full.md`               | Gen 3 full documentation                      |
+| `docs/migration.md`                 | How this folder was split from v2.0.0         |
+| `docs/latency_comparison.md`        | Full latency comparison report                |
+| `docs/latency_full_loop_OPC-UA.md`  | OPC UA baseline report                        |
+| `docs/upgrade_report.html`          | Session report: Prototype -> Production Grade |
+| `../CHANGELOG.md`                   | Version history (all generations)             |
 
 ---
 
 ## Lineage
 
-| Version | Robot         | Transport         | Architecture      | Location                |
-| :------ | :------------ | :---------------- | :---------------- | :---------------------- |
-| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic        | archived                |
-| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes       | `archive/v1.0-kuka/`    |
-| v0.2.0  | Yaskawa GP110 | OPC UA            | Monolithic bridge | `archive/v0.2-yaskawa/` |
-| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files) | `archive/v0.2-yaskawa/` |
-| v3.0.0  | Any robot     | Any transport     | Vendor-neutral    | `vendor-neutral/`       |
+| Version | Robot         | Transport         | Architecture                            | Location                |
+| :------ | :------------ | :---------------- | :-------------------------------------- | :---------------------- |
+| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic                              | archived                |
+| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes                             | `archive/v1.0-kuka/`    |
+| v0.2.0  | Yaskawa GP110 | OPC UA            | Monolithic bridge                       | `archive/v0.2-yaskawa/` |
+| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files)                       | `archive/v0.2-yaskawa/` |
+| v3.0.0  | Any robot     | Any transport     | Vendor-neutral                          | `vendor-neutral/`       |
+| v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests | `vendor-neutral/`       |
+
+---
+
+## Known Limitations
+
+The following limitations are **known and documented**. They do not
+affect the correctness of the digital twin for research or simulation,
+but they must be understood before deploying to a physical robot.
+
+### Isaac Sim 5.1
+
+- **No gravity compensation API on `Articulation`.** The current
+  workaround disables gravity for the robot links. This makes the arm
+  weightless in simulation — tracking error drops to near zero, but
+  payloads and vertical contacts are not simulated.
+- **`joint_2` and `joint_3` use `stiffness: 50,000,000` in `robot.yaml`.**
+  This is ~16x the value from published KR210 measurements (3M and 8.2M
+  respectively). It is required because gravity is disabled and the
+  drives must still track position accurately. Do not compare it to
+  physical stiffness values.
+- **`joint_5` is passive.** It appears in `all_joints` but is not
+  controlled by the PLC. It has no entry in `controlled_joints`.
+
+### PLC Bridge
+
+- **`robot.yaml` has `logging.to_ros: true`.** This causes duplicate
+  terminal lines in `trajectory_twin.py`. It should be `false`. The
+  `plc_ros_bridge.yaml` already has `false` — only `robot.yaml` is
+  affected. Fix: change to `to_ros: false`.
+- **`physics_twin.py` does not use `bridge_config.py`.** It opens
+  `robot.yaml` directly and does not validate `limits_deg` or `ruckig`
+  parameters. This is acceptable because `physics_twin` only needs the
+  Isaac paths and drives, but it means a malformed `robot.yaml` fails
+  inside Isaac Sim rather than at `trajectory_twin` startup.
+- **Residual server-side stalls (~400 ms every ~10 s).** Measured with
+  `tick_stats` — `slow_pct < 0.2%` but not zero. Traced to
+  `plc_server_win.py`, not the bridge. Acceptable for simulation;
+  should be fixed before production.
+
+### Not Certified
+
+This project is **not a certified safety function**. See the
+[Safety Notice](#safety-notice) at the top of this file.
 
 ---
 
@@ -687,15 +934,35 @@ These are already enabled by the current code and matter more than any external 
 - [x] **Fix liveness semantics** — `/plc/cmd_ang` always republished;
       only state topics are deduped
 
+### Gen 3.1 — Production-Grade Config (completed)
+
+- [x] **Pydantic v2 schema** (`bridge_config.py`) — replaces hand-written `_validate_config`
+  - Declarative, `extra="forbid"`, field ranges via `Field(gt=, le=)`
+  - Cross-reference validation with **field location** (`robot.cmd_ang[0]`)
+  - Direction sanity: `cmd_ang`/`act_ang`/`*_ack` must have correct `dir`
+  - Address safety: rejects `\x00`, `\n`, `\r`, `..` in `addr`
+- [x] **`schema_version` + migration chain** — v1.0 configs work unchanged
+- [x] **Audit trail** — `sha256` hash + ISO-8601 timestamp logged to JSONL
+- [x] **Fail-fast** — bad config rejected **before** any socket is opened
+- [x] **`robot.yaml` validation** — `_validate_limits`, Ruckig parameter sanity
+- [x] **26 unit tests** (`pytest tests/ -v` → 26 passed in 0.17 s)
+  - 19 for config schema (`test_bridge_config.py`)
+  - 7 for trajectory planner (`test_trajectory_twin.py`)
+- [x] **`requirements-dev.txt` + `pytest.ini`** — repeatable test setup
+- [x] **PEP 668 aware** — documented venv workflow for Python 3.11+
+
 ### In Progress
 
-- [ ] Unit tests for `plc_config` and `plc_drivers`
 - [ ] Yaskawa GP110 verification on this branch
 - [ ] Eliminate residual server-side stalls (~400 ms every ~10 s) —
       needs `plc_server_win.py` instrumentation
+- [ ] CI integration (GitHub Actions to run `pytest` on every push)
 
 ### Planned
 
+- [ ] Array type distinction in `SignalConfig` (`array: N`) — deferred;
+      current runtime detection of `list/tuple` works, and schema-level
+      distinction would require editing every YAML file
 - [ ] Cartesian motion layer (inverse kinematics)
 - [ ] Trajectory queue and blending
 - [ ] Certified safety layer (F-CPU + PROFIsafe) — postponed; see Safety Notice

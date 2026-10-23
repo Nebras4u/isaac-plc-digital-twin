@@ -1,87 +1,90 @@
 # plc_ros_bridge.yaml
-# ==========================================================================
-# Switch protocol by editing "plc.driver" ONLY.
-#
-#   opcua    → OPC UA server (S7-1500, PLCSIM Advanced, TwinCAT, ...)
-#   tcp_json → plc_server_win.py on Windows (cross-platform)
-#   plc_api  → direct PLCSIM Advanced API (Windows-only, fastest)
-# ==========================================================================
-latency_probe: false
+# Schema v2.0 — see bridge_config.py for the canonical definition.
+
+schema_version: "2.0"
 
 plc:
-  driver: tcp_json               # opcua | tcp_json | plc_api
-
-  # ----- opcua -----
-  endpoint: opc.tcp://192.168.122.123:4840
-  # user: "operator"
-  # password: "secret"
-
-  # ----- tcp_json -----
+  driver: tcp_json
   host: 192.168.122.98
   port: 5000
+  timeout: 1.0
 
-  # ----- plc_api -----
-  instance: "_ros2"
-
-  # Shared timeout for all drivers. 1.5 s is generous enough to survive
-  # the PLC server's occasional cold-start / reconnect stall, tight enough
-  # to surface a real link failure within one poll.
-  timeout: 1.5
-
-poll_hz: 60
-watchdog_timeout: 4.0
-
-# ==========================================================================
-# Structured logging
-# ==========================================================================
-logging:
-  level: INFO                # DEBUG | INFO | WARNING | ERROR
-  console: true              # print to stdout
-  to_ros: false              # forward to ROS 2 logger (false = no duplicates)
-  file: /workspace/plc_bridge_logs/bridge.log
-  json_file: /workspace/plc_bridge_logs/bridge.jsonl
-  max_bytes: 10485760        # 10 MB per file
-  backup_count: 5            # keep 5 rotated files
-
-# ==========================================================================
-# Address prefix per protocol
-# ==========================================================================
 vars:
-  ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
-  db: 'MAIN_KUKA_KR210_L150_L'
-  # For TwinCAT/Rockwell: use full Node IDs in signals instead.
+  ns: ""
+  db: "MAIN_KUKA_KR210_L150_L"
+  opcua_addr_template: '{ns}."{raw}"'
 
-# ==========================================================================
-# Signals
-# ==========================================================================
 signals:
-  cmd_ang:    {addr: 'MainRobotLeft_CmdAng', type: float, dir: read}
-  act_ang:    {addr: 'MainRobotLeft_ActAng', type: float, dir: write}
+  cmd_ang:
+    addr: "MainRobotLeft_CmdAng"
+    type: float
+    dir: read
 
-  cmd_enable: {addr: 'MainRobotLeft_CmdEnable',  type: bool,  dir: read}
-  velocity:   {addr: 'MainRobotLeft_Vlcty',      type: float, dir: read}
-  estop:      {addr: 'MainRobotLeft_Emergency_Stop_Active', type: bool, dir: read}
-  hb_counter: {addr: 'Heartbeat_Counter',        type: int,   dir: read}
-  comm_state: {addr: 'Comm_State',               type: int,   dir: read}
-  ros_alive:  {addr: 'ROS_Alive',                type: bool,  dir: read}
-  cmd_ack:    {addr: 'MainRobotLeft_CmdAck',     type: bool,  dir: write}
-  ros_ack_counter: {addr: 'ROS_Ack_Counter',     type: int,   dir: write}
+  act_ang:
+    addr: "MainRobotLeft_ActAng"
+    type: float
+    dir: write
 
-publish:
-  - {topic: /plc/velocity,       signal: velocity,   type: float}
-  - {topic: /plc/axis_enable,    signal: cmd_enable, type: bool}
-  - {topic: /plc/emergency_stop, signal: estop,      type: bool}
-  - {topic: /plc/ros_alive,      signal: ros_alive,  type: bool}
-  - {topic: /plc/comm_state,     signal: comm_state, type: int}
+  hb_counter:
+    addr: "Heartbeat_Counter"
+    type: int
+    dir: read
+  hb_ack:
+    addr: "ROS_Ack_Counter"
+    type: int
+    dir: write
 
-heartbeat:
-  counter: hb_counter
-  ack: ros_ack_counter
+  cmd_ack:
+    addr: "MainRobotLeft_CmdAck"
+    type: bool
+    dir: write
+
+  axis_enable:
+    addr: "MainRobotLeft_CmdEnable"
+    type: bool
+    dir: read
+  estop:
+    addr: "MainRobotLeft_Emergency_Stop_Active"
+    type: bool
+    dir: read
+  velocity_scale:
+    addr: "MainRobotLeft_Vlcty"
+    type: float
+    dir: read
 
 robot:
-  joints:  [joint_1, joint_2, joint_3, joint_4]
+  joints: [joint_1, joint_2, joint_3, joint_4]
   cmd_ang: [cmd_ang]
   act_ang: [act_ang]
   cmd_ack: cmd_ack
-  cmd_ang_topic: /plc/cmd_ang
-  joint_states_topic: /joint_states
+  cmd_ang_topic: "/plc/cmd_ang"
+  joint_states_topic: "/joint_states"
+
+heartbeat:
+  counter: hb_counter
+  ack: hb_ack
+
+# estop MUST be here: this is how the PLC E-stop reaches ROS.
+# The bridge reuses this publisher for its own estop events
+# (_set_connected, _check_watchdog), so there is only ONE writer.
+publish:
+  - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
+  - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
+  - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
+
+poll_hz: 60
+watchdog_timeout: 4.0
+backoff_max: 30.0
+warn_cooldown: 60.0
+
+latency_probe: false
+latency_probe_file: "latency_probe.csv"
+
+logging:
+  level: INFO
+  console: true
+  to_ros: false
+  file: "/workspace/plc_bridge_logs/bridge.log"
+  json_file: "/workspace/plc_bridge_logs/bridge.jsonl"
+  max_bytes: 10485760
+  backup_count: 5
