@@ -3,7 +3,8 @@ message: "If you use this software, please cite it using the metadata below."
 title: "isaac-plc-digital-twin: a vendor-neutral PLC to ROS 2 to Isaac Sim digital twin"
 type: software
 authors:
-  - given-names: "Nebras"
+  - family-names: "Damsarkho"
+    given-names: "Nebras"
     alias: "Nebras4u"
 repository-code: "https://github.com/Nebras4u/isaac-plc-digital-twin"
 license: Apache-2.0
@@ -26,4 +27,4 @@ keywords:
 # and uncomment them. Do not guess them; a wrong DOI breaks citations.
 # version: "3.1.0"
 # date-released: "2026-10-DD"
-# doi: "10.5281/zenodo.XXXXXXX"
+# doi: "10.5281/zenodo.23312011"
