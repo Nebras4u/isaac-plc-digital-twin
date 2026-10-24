@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "isaac-plc-digital-twin: a vendor-neutral PLC to ROS 2 to Isaac Sim digital twin"
+type: software
+authors:
+  - given-names: "Nebras"
+    alias: "Nebras4u"
+repository-code: "https://github.com/Nebras4u/isaac-plc-digital-twin"
+license: Apache-2.0
+abstract: >-
+  Open-source digital twin that connects a PLC (simulated with PLCSIM
+  Advanced) to a virtual robot in NVIDIA Isaac Sim through ROS 2. A bridge
+  reads PLC signals (TCP/JSON, OPC UA or PLCSIM API), a Ruckig-based
+  trajectory generator produces smooth setpoints, and a physics executor
+  drives the simulated robot and returns its measured state to the PLC.
+  Robot, PLC and signal mapping are changed by editing YAML files only.
+keywords:
+  - digital twin
+  - PLC
+  - ROS 2
+  - Isaac Sim
+  - OPC UA
+  - virtual commissioning
+  - Ruckig
+# TODO before publishing: fill in the values below from your Zenodo record
+# and uncomment them. Do not guess them; a wrong DOI breaks citations.
+# version: "3.1.0"
+# date-released: "2026-10-DD"
+# doi: "10.5281/zenodo.XXXXXXX"
