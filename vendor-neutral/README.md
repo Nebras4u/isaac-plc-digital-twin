@@ -1,6 +1,8 @@
 # Isaac Digital Twin — Vendor-Neutral Platform
 
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PLC](https://img.shields.io/badge/PLC-Vendor--Neutral-lightgrey)](#supported-plcs)
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
@@ -972,7 +974,7 @@ This project is **not a certified safety function**. See the
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ---
 
