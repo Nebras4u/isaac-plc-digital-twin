@@ -1,7 +1,9 @@
 # Isaac Digital Twin — Multi-Generation Platform
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312011.svg)](https://doi.org/10.5281/zenodo.23312011)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[
+
+![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Latency](https://img.shields.io/badge/Mean%20latency-5.2%20ms-success)](#latency-performance)
 [![Max](https://img.shields.io/badge/Max%20latency-16.3%20ms-success)](#latency-performance)
