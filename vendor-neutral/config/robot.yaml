@@ -13,6 +13,7 @@ robot:
     joint_2: [-188.0,   35.0]
     joint_3: [-114.6, 143.2]
     joint_4: [-350.0, 350.0]
+    #joint_5: [-361.0, 361.0]   # passive, not in controlled_joints
 
   isaac_path:  /World/Main_Robot_L_URDF/base_link
   isaac_scope: /World/Main_Robot_L_URDF
