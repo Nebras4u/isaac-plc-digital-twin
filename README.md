@@ -10,15 +10,19 @@ An industrial-grade **Digital Twin platform** for robot arms driven by
 **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through
 **ROS 2**.
 
+
+
 ![S7-1500T ↔ ROS2 ↔ Isaac Sim](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/yaskawa/docs/images/PLC-ROS2-ISAAC.jpg)
+
+
 
 The repository hosts three generations of the platform, side by side:
 
 | Generation                 | Robot               | Transport                  | Location                                         | Status       |
 | :------------------------- | :------------------ | :------------------------- | :----------------------------------------------- | :----------- |
 | **Gen 3 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api | [`vendor-neutral/`](vendor-neutral/)             | **Active**   |
-| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                     | [`archive/v0.2-yaskawa/`](yaskawa/) | Reference    |
-| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                   | [`archive/v1.0-kuka/`](kuka/)       | Reference    |
+| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                     | [`yaskawa/`](yaskawa/)           | Reference    |
+| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                   | [`kuka/`](kuka/)                 | Reference    |
 
 ---
 
@@ -94,7 +98,8 @@ Highlights:
 - Sub-0.03° tracking accuracy verified
 - **Full-loop latency: 5.2 ms mean, 16.3 ms max** (TCP-JSON optimized,
   reference machine — see [Environment](#environment))
-- **58% faster** than the original TCP-JSON baseline
+- **58% faster** than the naive TCP-JSON baseline on the same machine
+  (mean 12.5 ms → 5.2 ms)
 - **29 unit tests** covering the config schema, migration, E-stop
   forwarding, and Ruckig parameter validation
 - **Config schema v2.1** (Pydantic v2, fail-fast, audit trail)
@@ -120,12 +125,13 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
   A setpoint that arrived since the last frame is applied in the same
   frame. Result: `isaac_step` −62%.
 - **`trajectory_twin.py` — `SingleThreadedExecutor` (was `MultiThreaded`).**
-  MultiThread added overhead on `ros_ruckig` (+26%) without improving
-  `isaac_step`.
+  Intended to remove executor overhead on `ros_ruckig`. The measured
+  effect against v3.1.1 is still unexplained — see
+  [Interpretation](#results-this-machine) and `VL-16` in the CHANGELOG.
 - **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams. Old samples
   are dropped instead of queued.
 
-**v3.1.1 — Environment Transparency and Real VM Results:**
+**v3.1.1 — Environment Transparency and Real VM Results** (2026-10-23):
 
 - **README:** added `Environment` section and `Results (this machine)`
   with real Docker / RTX 5060 numbers.
@@ -228,7 +234,7 @@ Measured on a **different environment** than the reference machine:
 | `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
 | `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
 | `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
-| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (DDS)  |
+| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (unexplained, see below) |
 | `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
 | `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
 | `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
@@ -245,14 +251,19 @@ Measured on a **different environment** than the reference machine:
   vCPU.
 - `convert_pub` (0.05 ms) and `queue_delay` (5.42 ms) are close to the
   reference machine — the bridge-side code is **not** the bottleneck.
+- `ros_ruckig` went **up** (6.57 → 8.14 ms) between v3.1.1 and v3.1.2,
+  although the executor change in `trajectory_twin.py` was meant to
+  reduce its overhead. The earlier "(DDS)" attribution was not verified.
+  Treat this as an open item (`VL-16`) and re-measure before drawing
+  conclusions.
 - The single outlier (`max = 103575 ms`) is a **103-second stall** in
   Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded
-  from the filtered statistics.
+  from the filtered statistics; its root cause is still open (`VL-14`).
 
 **Conclusion:** the fixes reduced median full-loop latency by **30%**
 (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms
 from **6.78% → 63.37%**. The remaining gap to the reference machine is
-environmental (VM), not algorithmic.
+mostly environmental (VM), not algorithmic.
 
 ---
 
@@ -340,8 +351,8 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 | :-------------------------------------------------------------------------------------- | :----------------------------------------- |
 | [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 3 (active) — vendor-neutral platform   |
 | [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports  |
-| [`kuka/README.md`](kuka/README.md)                                                       | Gen 1 — KUKA KR210                         |
-| [`yaskawa/README.md`](yaskawa/docs/README.md)                                            | Gen 2 — Yaskawa GP110                      |
+| [`archive/kuka/README.md`](archive/kuka/README.md)                                       | Gen 1 — KUKA KR210                         |
+| [`archive/yaskawa/docs/README.md`](archive/yaskawa/docs/README.md)                       | Gen 2 — Yaskawa GP110                      |
 | [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                            |
 | [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                    |
 
