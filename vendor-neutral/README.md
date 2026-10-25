@@ -17,8 +17,9 @@ The platform synchronizes any robot arm with any PLC through **ROS 2**,
 using a transport-agnostic bridge and a robot-agnostic YAML configuration.
 
 This folder (`vendor-neutral/`) is the evolution of two robot-specific
-implementations (KUKA KR210 and Yaskawa GP110) into a reusable,
-configuration-driven platform.
+implementations — KUKA KR210 ([`../kuka/`](../kuka/)) and Yaskawa GP110
+([`../yaskawa/`](../yaskawa/)) — into a reusable, configuration-driven
+platform.
 
 ---
 
@@ -128,7 +129,8 @@ these concerns to the modules above.
 
 **Since Gen 3.1**, configuration validation is **declarative**
 (Pydantic v2 schema in `bridge_config.py`), with **versioning**,
-**audit trail**, and **29 unit tests** covering every structural rule.
+**audit trail**, and **29 unit tests** covering the main structural
+rules (see [Testing](#testing) for what is and is not covered).
 A bad config fails **before** the bridge touches the PLC.
 
 ---
@@ -183,18 +185,32 @@ differs.
 
 ### Runtime threading model
 
-`plc_ros_bridge.py` runs on a **`SingleThreadedExecutor`**. This is
-deliberate:
+**Since v3.1.2**, `plc_ros_bridge.py` separates PLC I/O from ROS
+callbacks:
 
-- Timer (`tick()`) and subscriber (`on_joint_states()`) callbacks run
-  strictly in sequence.
-- They cannot race for the Python GIL mid-tick, which was causing
-  200–1000 ms `read` stalls on VMs.
-- The 60 Hz tick is preserved; the only cost is that a subscriber
-  callback can delay the next tick by its own runtime (~20–50 µs).
+- `tick()` (PLC read/write) runs in `_io_loop` on a **dedicated thread**.
+- `on_joint_states()` (ROS subscriber) runs on a
+  **`SingleThreadedExecutor`** and is delivered immediately, without
+  waiting for a PLC read to finish.
+- `_last_tick_end_ns` is recorded at the end of each `tick()` so the
+  probe can measure the real `queue_delay`.
 
-`trajectory_twin.py` and `physics_twin.py` use the default executor; they
-do not touch the same critical timing as the bridge.
+**Why it changed:** up to v3.1.1, `tick()` and `on_joint_states()` shared
+the same `SingleThreadedExecutor`. That serialized the two callbacks and
+avoided the GIL races that had caused 200–1000 ms `read` stalls on VMs,
+but a slow PLC read (6–7 ms) delayed `/joint_states` delivery and
+inflated `ros_back` to ~4.7 ms. Moving the I/O out of the executor
+reduced `ros_back` by 92% (see [Results (this machine)](#results-this-machine)).
+
+**What to watch:** the two threads now share the GIL again, so keep an
+eye on `avg_slow_gap_ms` in the `tick_stats` line (see
+[Terminal output](#terminal-output)). A non-zero value means bridge-side
+GIL contention.
+
+`trajectory_twin.py` also uses a **`SingleThreadedExecutor`** (since
+v3.1.2). `physics_twin.py` calls `rclpy.spin_once()` at the **start** of
+each frame, before `step()` and `publish_states()`, so a setpoint that
+arrived since the last frame is applied in the same frame.
 
 ---
 
@@ -526,6 +542,12 @@ robot silently stops moving. Only the **state** topics
 `/plc/ros_alive`, `/plc/comm_state`) are deduped — they are latched
 state and rarely change.
 
+**QoS (since v3.1.2):** the high-rate streams `/plc/cmd_ang`,
+`/servo_setpoints`, and `/joint_states` use `BEST_EFFORT` with
+`depth=1`. Old samples are dropped instead of queued. `RELIABLE`
+publishers remain compatible with `BEST_EFFORT` subscribers, so no
+migration is needed.
+
 ### `config/robot.yaml` — Robot description
 
 > **Note:** The Isaac Sim URDF (`isaac/Main_Robot_L_URDF_tool.urdf`) is a
@@ -589,46 +611,70 @@ Expected output:
 
     ============================== 29 passed in 0.17s ==============================
 
+To list the collected tests without running them:
+
+    python3 -m pytest tests/ --collect-only -q
+
 ### What is tested
 
-The 29 unit tests cover **every structural rule** enforced by the schema
-and the trajectory planner. Each test maps to a specific industrial risk:
+The 29 unit tests cover the **main structural rules** enforced by the
+schema and the Ruckig planner parameters. Each test maps to a specific
+industrial risk.
 
 **`tests/test_bridge_config.py` — 22 tests**
 
-| Test                                                     | Prevents                                                     |
-| :------------------------------------------------------- | :----------------------------------------------------------- |
-| `test_minimal_valid`                                     | Baseline: a valid config loads without error                 |
-| `test_v1_migration`                                      | Old configs (no `schema_version`) still work                 |
-| `test_missing_driver`                                    | Bridge starting without a driver selected                    |
-| `test_unknown_field`                                     | Silent typos in field names (`poll_hzz` → ignored)           |
-| `test_empty_signals`                                     | Empty signal map causing runtime `KeyError`                  |
-| `test_poll_hz_out_of_range[0/-1/1001/100000]`            | CPU-melting poll rates or division by zero                   |
-| `test_tcpjson_requires_host`                             | `tcp_json` without `host` → `KeyError` after 10 s            |
-| `test_opcua_requires_endpoint`                           | `opcua` without `endpoint` → connection hang                 |
-| `test_cross_ref_includes_location`                       | Missing signal reported **without its location**             |
-| `test_publish_cross_ref_location`                        | Same, for `publish[].signal`                                 |
-| `test_cmd_ang_must_be_read`                              | `cmd_ang` marked `write` → bridge tries to write a read tag  |
-| `test_act_ang_must_be_write`                             | Same, inverse                                                |
-| `test_addr_rejects_control_chars[a\x00b/a\nb/a\rb/a..b]` | Path-traversal or NUL injection in signal addresses          |
-| `test_physics_twin_reinit`                               | `_needs_reinit` fails to rebuild Articulation after Stop/Play|
-| `test_robot_yaml_limits`                                 | `limits_deg` invalid (lower >= upper, range > 720°)          |
-| `test_config_hash_deterministic`                         | same config produces different hashes across runs            |
-| `test_estop_forwarding_required`                         | Missing e-stop rule is rejected at config load               |
-| `test_estop_forwarding_optout`                           | `estop_forwarding_required: false` allows tests to omit it   |
-| `test_estop_forwarding_present`                          | A valid e-stop rule passes                                   |
+| Test                                                     | Prevents                                                              |
+| :------------------------------------------------------- | :-------------------------------------------------------------------- |
+| `test_minimal_valid`                                     | Baseline: a valid config loads (schema version, `poll_hz`, sha256 hash) |
+| `test_v1_migration`                                      | Old configs (no `schema_version`) stop loading                        |
+| `test_missing_driver`                                    | A config with no `plc` section (no driver selected)                   |
+| `test_unknown_field`                                     | Silent typos in field names (unknown key inside a signal)             |
+| `test_empty_signals`                                     | Empty signal map causing runtime `KeyError`                           |
+| `test_poll_hz_out_of_range[0/-1/1001/100000]` (4 cases)  | CPU-melting poll rates or division by zero                            |
+| `test_tcpjson_requires_host`                             | `tcp_json` without `host` → failure only at connect time              |
+| `test_opcua_requires_endpoint`                           | `opcua` without `endpoint` → connection hang                          |
+| `test_cross_ref_includes_location`                       | Missing signal reported **without its location** (`robot.cmd_ang[1]`) |
+| `test_publish_cross_ref_location`                        | Same, for `publish[1].signal`                                         |
+| `test_cmd_ang_must_be_read`                              | `cmd_ang` marked `write` → bridge tries to write a read tag           |
+| `test_act_ang_must_be_write`                             | Same, inverse                                                         |
+| `test_addr_rejects_control_chars[a\x00b/a\nb/a\rb/a..b]` (4 cases) | NUL / newline / path-traversal characters in signal addresses (tested on `SignalConfig` directly) |
+| `test_estop_forwarding_required`                         | Production config without an E-stop rule in `publish` is rejected     |
+| `test_estop_forwarding_optout`                           | `estop_forwarding_required: false` lets small test configs omit it    |
+| `test_estop_forwarding_present`                          | A config that forwards the E-stop to `/plc/emergency_stop` passes     |
+
+The 16 rows above expand to **22 test cases** (4 + 4 parametrized cases).
 
 **`tests/test_trajectory_twin.py` — 7 tests**
 
-| Test                                     | Prevents                                       |
+All seven are cases of `test_ruckig_rejects_bad_params`; each must raise
+`ValueError` from `RuckigPlanner`.
+
+| Case                                     | Prevents                                       |
 | :--------------------------------------- | :--------------------------------------------- |
 | `test_ruckig_rejects_bad_params[bad0]`   | `control_hz=0` → `ZeroDivisionError`           |
 | `test_ruckig_rejects_bad_params[bad1]`   | `control_hz=2000` → unrealistic CPU load       |
-| `test_ruckig_rejects_bad_params[bad2]`   | `control_hz=-1` → nonsensical timer            |
-| `test_ruckig_rejects_bad_params[bad3]`   | `max_vel=0` → robot never moves                |
-| `test_ruckig_rejects_bad_params[bad4]`   | `max_acc=0` → same                             |
-| `test_ruckig_rejects_bad_params[bad5]`   | `max_jerk=0` → same                            |
+| `test_ruckig_rejects_bad_params[bad2]`   | `max_vel=0` → robot never moves                |
+| `test_ruckig_rejects_bad_params[bad3]`   | `max_vel=-1` → nonsensical limit               |
+| `test_ruckig_rejects_bad_params[bad4]`   | `max_acc=0` → robot never moves                |
+| `test_ruckig_rejects_bad_params[bad5]`   | `max_jerk=0` → robot never moves               |
 | `test_ruckig_rejects_bad_params[bad6]`   | `jump_threshold=0` → velocity reset every tick |
+
+### Not yet covered
+
+These rules are implemented (see [Configuration](#configuration)) but
+have **no test in the two files above**:
+
+- `robot.yaml` validation: `limits_deg` (`lower < upper`, range ≤ 720°)
+  and the `controlled_joints` ↔ `limits_deg` cross-check.
+- Range checks on `watchdog_timeout` and `backoff_max`.
+- Direction checks on `*_ack` signals and on `publish[].signal`
+  (`dir: read`).
+- Config hash determinism (same content → same hash).
+- Migration steps beyond v1.0 → v2.1.
+- Planner state-machine transitions (`IDLE` → `RUNNING` → `STOPPING`,
+  brake completion, bad command in `IDLE`) — tracked as `VL-07`. The
+  stub-based test used to verify the brake fix is the starting point.
+- `physics_twin.py` re-initialization after Stop/Play (`_needs_reinit`).
 
 ### Why unit tests matter here
 
@@ -636,8 +682,9 @@ The code is used to drive a real PLC and a real robot. A regression
 introduced during a future refactor (e.g. removing the `Field(gt=0)`
 constraint from `poll_hz`) would not be visible until the bridge is
 running under load — at which point the failure mode is either a crash
-or a frozen host. The tests make that regression **visible in 0.2 s**,
-on every commit.
+or a frozen host. The tests make that regression **visible in 0.2 s**
+whenever they are run (automatic runs on every push are on the
+[Roadmap](#roadmap)).
 
 ### Running tests in CI (optional)
 
@@ -725,22 +772,27 @@ See `docs/latency_comparison.md` for the full report.
 Measured with the `tick_stats` diagnostic (60 Hz, 10 s window,
 `tcp_json` transport, TSC clocksource).
 
+> **Measured before v3.1.2.** These numbers were taken when `tick()` and
+> `on_joint_states()` still shared one `SingleThreadedExecutor`. After
+> the v3.1.2 change (PLC I/O on a dedicated thread), re-check
+> `avg_slow_gap_ms` on your own setup.
+
 | Metric                              | Value        | Notes                                  |
 | :---------------------------------- | :----------- | :------------------------------------- |
 | Effective tick rate                 | 60.0 Hz      | `ticks` increments by exactly 600/10 s |
 | Slow reads (>200 ms)                | 0–1 per 10 s | one per ~10 s, then zero               |
 | `slow_pct`                          | 0.00–0.17%   | stabilizes under 0.1% after warm-up    |
 | Median read (`sock_ms`)             | 0.2 ms       | measured against the same server       |
-| Slow-read `gap_ms` (GIL wait)       | **0.0**      | after `SingleThreadedExecutor` fix     |
+| Slow-read `gap_ms` (GIL wait)       | **0.0**      | with the shared `SingleThreadedExecutor` |
 | Slow-read `sock_ms` (socket wait)   | 219–406 ms   | server-side cold-start stall           |
 
-**Interpretation:** after the GIL-contention fixes, the bridge sustains
-a genuine 60 Hz loop. The residual ~0.05% `slow_read` warnings are
-**server-side stalls**, not bridge-side timing artifacts. They are
-tolerated by `timeout: 1.5` and `watchdog_timeout: 4.0` and do not cause
-spurious e-stops or setpoint interruptions.
+**Interpretation:** with the GIL-contention fixes of that time, the
+bridge sustained a genuine 60 Hz loop. The residual ~0.05% `slow_read`
+warnings are **server-side stalls**, not bridge-side timing artifacts.
+They are tolerated by `timeout: 1.5` and `watchdog_timeout: 4.0` and do
+not cause spurious e-stops or setpoint interruptions.
 
-For comparison, before the fixes:
+For comparison, before those fixes:
 
 | Metric                              | Before      | After     |
 | :---------------------------------- | :---------- | :-------- |
@@ -895,9 +947,10 @@ machine's hardware.
 6. For QEMU/KVM: enable `hypervclock`, disable `hpet`, pin vCPUs, then
    re-run.
 
-### Results (this machine — after fixes, v3.1.2)
+### Results (this machine)
 
-After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
+Measured on a **different environment** than the reference machine,
+after the v3.1.2 fixes described below:
 
 | Item         | Value                                  |
 | :----------- | :------------------------------------- |
@@ -908,7 +961,7 @@ After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 | ROS 2        | Jazzy                                  |
 | RMW          | FastDDS                                |
 
-**Full-loop latency** (1,881 samples, `latency_probe: true`):
+**Full-loop latency** (1,881 samples, `latency_probe: true`, v3.1.2):
 
 | Stage          | Median   | p95      | p99       | Max        |
 | :------------- | -------: | -------: | --------: | ---------: |
@@ -921,7 +974,7 @@ After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 | `write_net`    | 12.15 ms | 20.61 ms | 36.79 ms  | 132.64 ms  |
 | **`total_loop`** | **47.20 ms** | **67.28 ms** | **151.49 ms** | **104091.64 ms** |
 
-**LBP (Latency Bound Probability) — this machine (after fixes):**
+**LBP (Latency Bound Probability) — this machine (v3.1.2):**
 
 | Threshold | LBP    |
 | :-------- | -----: |
@@ -942,14 +995,14 @@ After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 | p95    | 64.51 ms  |
 | max    | 151.49 ms |
 
-**Comparison: before vs after fixes**
+**Comparison: before vs after fixes (v3.1.1 → v3.1.2):**
 
 | Stage          | Before (v3.1.1) | After (v3.1.2) | Improvement |
 | :------------- | --------------: | -------------: | ----------: |
 | `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
 | `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
 | `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
-| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (DDS)  |
+| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (unexplained, see below) |
 | `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
 | `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
 | `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
@@ -962,7 +1015,7 @@ After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 1. **`plc_ros_bridge.py`** — PLC I/O moved to a **dedicated thread** (`_io_loop`), separate from the ROS executor. This eliminates the contention between `tick()` (PLC I/O) and `on_joint_states()` (ROS callback). Result: `ros_back` −92%, `total_loop` −30%.
 2. **`plc_ros_bridge.py`** — `_last_tick_end_ns` recorded at the end of each `tick()`, so `origin_ns` reflects the end of the previous tick (queue delay measurable). Before: `queue_delay = 0.00` (meaningless).
 3. **`physics_twin.py`** — `rclpy.spin_once()` moved **before** `step()` and `publish_states()`, so a setpoint that arrived since the last frame is applied in **this** frame. Result: `isaac_step` −62%.
-4. **`trajectory_twin.py`** — `SingleThreadedExecutor` (was `MultiThreadedExecutor`). MultiThread added overhead on `ros_ruckig` (+26%) without improving `isaac_step`.
+4. **`trajectory_twin.py`** — `SingleThreadedExecutor` (was `MultiThreadedExecutor`). In a direct comparison MultiThread showed higher `ros_ruckig` (10.99 ms vs 8.14 ms) without improving `isaac_step`. Note that the v3.1.1 baseline was 6.57 ms, so the net change against v3.1.1 is still +24% (see `VL-16`).
 5. **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams (`/plc/cmd_ang`, `/servo_setpoints`, `/joint_states`). Old samples are dropped instead of queued.
 
 **Interpretation:**
@@ -970,9 +1023,10 @@ After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 - The VM is still **~3× slower** than the reference machine (47 ms vs ~15 ms).
 - The dominant remaining contributors are `write_net` (~12 ms) and `isaac_step` (~10 ms). Both are tied to the **QEMU/KVM environment**: PLCSIM Advanced API on Windows VM and Isaac Sim physics step on shared vCPU.
 - `convert_pub` (0.05 ms) and `queue_delay` (5.42 ms) are close to the reference machine — the bridge-side code is **not** the bottleneck.
-- The single outlier (`max = 103575 ms`) is a **103-second stall** in Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded from the filtered statistics.
+- `ros_ruckig` went **up** (6.57 → 8.14 ms) between v3.1.1 and v3.1.2, although the executor change was meant to reduce its overhead. The earlier "(DDS)" attribution was not verified. Treat this as an open item (`VL-16`) and re-measure with identical executor and QoS settings before drawing conclusions.
+- The single outlier (`max = 103575 ms`) is a **103-second stall** in Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded from the filtered statistics; its root cause is still open (`VL-14`).
 
-**Conclusion:** the fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is environmental (VM), not algorithmic.
+**Conclusion:** the fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is mostly environmental (VM), not algorithmic.
 
 ---
 
@@ -991,7 +1045,8 @@ The platform can be tuned for different latency/robustness trade-offs.
 > **Note:** CycloneDDS requires Isaac Sim to use its **internal** ROS 2
 > libraries (Python 3.11), not the system ROS 2 (Python 3.12). See
 > [ROS 2 Bridge environment (Isaac Sim)](#ros-2-bridge-environment-isaac-sim).
-> For the simplest setup, keep FastDDS on all nodes.
+> It is **not supported** on the current Isaac Sim setup (`VL-15`). For
+> the simplest setup, keep FastDDS on all nodes.
 
 ### Bridge-Side Tuning (built in)
 
@@ -1000,7 +1055,9 @@ external knob at 60 Hz:
 
 | Tuning                           | Effect                                                                                    |
 | :------------------------------- | :---------------------------------------------------------------------------------------- |
-| `SingleThreadedExecutor`         | Eliminates GIL contention between timer and subscriber callbacks (was 200-1000 ms stalls) |
+| Dedicated PLC I/O thread (v3.1.2)| A slow PLC read no longer delays `/joint_states` delivery (`ros_back` −92%)               |
+| `SingleThreadedExecutor`         | ROS callbacks run strictly in sequence; no executor overhead in `trajectory_twin.py`      |
+| `BEST_EFFORT` + `depth=1` QoS    | Old samples are dropped instead of queued on high-rate streams                            |
 | State-topic publish dedupe       | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state                             |
 | `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive)                                             |
 | Monotonic timing                 | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics                  |
@@ -1013,6 +1070,14 @@ external knob at 60 Hz:
 - `gap_ms > 0` → bridge-side, check host CPU load (`top -H`, `taskset`)
 - `sock_ms > 0` → server-side, see `plc_server_win.py` — usually a ~10 s
   periodic task holding a lock or doing a slow fsync
+
+### VM-specific tuning
+
+| Symptom                              | Suggested action                                                          | Ref.   |
+| :----------------------------------- | :------------------------------------------------------------------------ | :----- |
+| `write_net` ~12 ms                   | Use the `plc_api` driver (PLCSIM direct) if the bridge runs on Windows    | VL-12  |
+| `isaac_step` ~10 ms                  | Enable GPU passthrough or run Isaac Sim on a native host                  | VL-13  |
+| One-off multi-second stall in Isaac  | Avoid Play/Pause and re-init during measurement runs                      | VL-14  |
 
 ### Transport Tuning
 
@@ -1055,14 +1120,15 @@ external knob at 60 Hz:
 
 ## Lineage
 
-| Version | Robot         | Transport         | Architecture                            | Location                |
-| :------ | :------------ | :---------------- | :-------------------------------------- | :---------------------- |
-| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic                              | archived                |
-| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes                             | `archive/v1.0-kuka/`    |
-| v0.2.0  | Yaskawa GP110 | OPC UA            | Monolithic bridge                       | `archive/v0.2-yaskawa/` |
-| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files)                       | `archive/v0.2-yaskawa/` |
-| v3.0.0  | Any robot     | Any transport     | Vendor-neutral                          | `vendor-neutral/`       |
-| v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 29 tests | `vendor-neutral/`       |
+| Version | Robot         | Transport         | Architecture                                       | Location                |
+| :------ | :------------ | :---------------- | :------------------------------------------------- | :---------------------- |
+| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic                                         | archived                |
+| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes                                        | [`../kuka/`](../kuka/)  |
+| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files)                                  | [`../yaskawa/`](../yaskawa/) |
+| v3.0.0  | Any robot     | Any transport     | Vendor-neutral                                     | `vendor-neutral/`       |
+| v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests            | `vendor-neutral/`       |
+| v3.1.1  | Any robot     | Any transport     | + `trajectory_twin.py`, environment transparency, 29 tests | `vendor-neutral/` |
+| v3.1.2  | Any robot     | Any transport     | + threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes | `vendor-neutral/`    |
 
 ---
 
@@ -1091,6 +1157,11 @@ but they must be understood before deploying to a physical robot.
 - **ROS 2 Bridge must use Isaac Sim's internal Python 3.11 libraries.**
   Do not `source /opt/ros/jazzy/setup.bash` before starting Isaac Sim.
   See [ROS 2 Bridge environment (Isaac Sim)](#ros-2-bridge-environment-isaac-sim).
+- **CycloneDDS is not supported** on this branch's Isaac Sim setup
+  (Python 3.11 vs 3.12 mismatch). Use FastDDS on all nodes (`VL-15`).
+- **One 103 s Isaac Sim stall observed** (Play/Pause or re-init). It is
+  excluded from the filtered statistics and its root cause has not been
+  investigated (`VL-14`).
 
 ### PLC Bridge
 
@@ -1110,6 +1181,26 @@ but they must be understood before deploying to a physical robot.
 - **One 6 s link drop was observed on the VM environment**, producing a
   single 9514 ms outlier in `latency_probe.csv`. Excluded from the
   filtered statistics in [Results (this machine)](#results-this-machine).
+
+### Performance on VM
+
+- **`write_net` ~12 ms** (PLCSIM Advanced API on a Windows guest).
+  Reduce by switching to the `plc_api` driver if the bridge runs on
+  Windows (`VL-12`).
+- **`isaac_step` ~10 ms** (shared vCPU). Reduce with GPU passthrough or
+  a native host (`VL-13`).
+- **`ros_ruckig` median rose from 6.57 ms (v3.1.1) to 8.14 ms
+  (v3.1.2).** Cause not verified; re-measure before drawing conclusions
+  (`VL-16`).
+
+### Verification status
+
+- **`VL-06`** — the v3.1.1 fixes (brake not cancelled by a persistent bad
+  command; e-stop not auto-cleared on reconnect) were verified with
+  stubbed ROS 2 / Ruckig only. They have not yet been re-tested on Isaac
+  Sim or PLCSIM Advanced.
+- **`VL-07`** — no automated tests yet for the planner state-machine
+  transitions.
 
 ### Not Certified
 
@@ -1138,7 +1229,7 @@ This project is **not a certified safety function**. See the
 - [x] Fix: bridge no longer auto-clears the e-stop on PLC reconnect
 - [x] Clock drift characterization (physical + QEMU/KVM)
 - [x] **Bridge reaches clean 60 Hz**
-  - `SingleThreadedExecutor` eliminates GIL contention
+  - `SingleThreadedExecutor` eliminates GIL contention (as of v3.1.1)
   - State-topic publish dedupe (~300 msg/s → <10 msg/s)
   - Monotonic timing in all latency measurements
   - `tick_stats` diagnostic splits `gap_ms` (GIL) from `sock_ms` (server)
@@ -1174,14 +1265,30 @@ This project is **not a certified safety function**. See the
 - [x] **E-stop forwarding enforced** — config rejected if the PLC E-stop
       is not forwarded to `/plc/emergency_stop` (opt-out for tests)
 
+### Gen 3.1.x — Transparency and VM performance (completed)
+
+- [x] **v3.1.1** — `Environment` section and real VM results; Safety
+      Notice; `krc_twin.py` replaced by `trajectory_twin.py`
+- [x] **v3.1.2** — PLC I/O on a dedicated thread (`ros_back` −92%,
+      `total_loop` −30%)
+- [x] **v3.1.2** — `spin_once` before `step`/`publish_states` in
+      `physics_twin.py` (`isaac_step` −62%)
+- [x] **v3.1.2** — `BEST_EFFORT` + `depth=1` QoS on high-rate streams
+- [x] **v3.1.2** — `SingleThreadedExecutor` in `trajectory_twin.py`
+
 ### In Progress
 
 - [ ] Yaskawa GP110 verification on this branch
 - [ ] Eliminate residual server-side stalls (~400 ms every ~10 s) —
       needs `plc_server_win.py` instrumentation
 - [ ] CI integration (GitHub Actions to run `pytest` on every push)
-- [ ] Improve VM performance — investigate `isaac_step` (~27 ms) and
-      `write_net` (~16 ms) on the Docker environment
+- [ ] Re-test the v3.1.1 fixes on Isaac Sim and PLCSIM Advanced (`VL-06`)
+- [ ] Automated tests for the planner state machine (`VL-07`) and for
+      the rules listed under [Not yet covered](#not-yet-covered)
+- [ ] Explain the `ros_ruckig` increase between v3.1.1 and v3.1.2 (`VL-16`)
+- [ ] Investigate the 103 s Isaac Sim stall (`VL-14`)
+- [ ] Improve VM performance — `write_net` (~12 ms, `VL-12`) and
+      `isaac_step` (~10 ms, `VL-13`) on the Docker environment
 - [ ] Optional: CycloneDDS support on Isaac Sim (requires internal
       Python 3.11 libraries and `LD_LIBRARY_PATH` — see Known Limitations)
 
@@ -1192,6 +1299,8 @@ This project is **not a certified safety function**. See the
       distinction would require editing every YAML file
 - [ ] Cartesian motion layer (inverse kinematics)
 - [ ] Trajectory queue and blending
+- [ ] Authentication on the `tcp_json` transport
+- [ ] Real-time guarantees (PREEMPT_RT)
 - [ ] Certified safety layer (F-CPU + PROFIsafe) — postponed; see Safety Notice
 - [ ] Native OPC UA on Windows (remove PLC server dependency)
 
