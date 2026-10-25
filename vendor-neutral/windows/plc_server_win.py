@@ -6,6 +6,11 @@
 #
 # Every reply carries "seq" (monotonic per connection) and "ts" (unix time),
 # so the bridge can reject stale replies after a reconnect.
+#
+# Optional timing diagnostics: set the environment variable PLC_TIMING=1.
+# Every 10 s the server prints, per API call type and per command, how many
+# calls were made and the mean / max time in milliseconds. Use it to find
+# which PLCSIM API call is slow.
 
 import os
 import sys
@@ -92,19 +97,55 @@ ARRAYS = {
 }
 
 
+# ---- Optional timing diagnostics (PLC_TIMING=1) ----
+TIMING = os.environ.get("PLC_TIMING", "0") == "1"
+_tstat = {}
+_tlock = threading.Lock()
+
+
+def _rec(kind, ms):
+    with _tlock:
+        s = _tstat.setdefault(kind, [0, 0.0, 0.0])
+        s[0] += 1
+        s[1] += ms
+        if ms > s[2]:
+            s[2] = ms
+
+
+def _timing_reporter():
+    while True:
+        time.sleep(10.0)
+        with _tlock:
+            snap = {k: list(v) for k, v in _tstat.items()}
+            _tstat.clear()
+        if not snap:
+            continue
+        print("---- PLC timing (last 10 s): kind, calls, mean ms, max ms ----")
+        for k in sorted(snap):
+            n, tot, mx = snap[k]
+            print(f"  {k:<14} {n:>6} {tot / n:>9.3f} {mx:>9.3f}")
+
+
 def _read_one(name, t):
-    if t == BOOL:  return bool(instance.ReadBool(name))
-    if t == LREAL: return float(instance.ReadDouble(name))
-    if t == DINT:  return int(instance.ReadInt32(name))
-    if t == INT:   return int(instance.ReadInt16(name))
-    return None
+    t0 = time.perf_counter() if TIMING else 0.0
+    if t == BOOL:    v = bool(instance.ReadBool(name))
+    elif t == LREAL: v = float(instance.ReadDouble(name))
+    elif t == DINT:  v = int(instance.ReadInt32(name))
+    elif t == INT:   v = int(instance.ReadInt16(name))
+    else:            v = None
+    if TIMING:
+        _rec(f"api_read_{t}", (time.perf_counter() - t0) * 1000.0)
+    return v
 
 
 def _write_one(name, t, value):
+    t0 = time.perf_counter() if TIMING else 0.0
     if t == BOOL:    instance.WriteBool(name, bool(value))
     elif t == LREAL: instance.WriteDouble(name, float(value))
     elif t == DINT:  instance.WriteInt32(name, int(value))
     elif t == INT:   instance.WriteInt16(name, int(value))
+    if TIMING:
+        _rec(f"api_write_{t}", (time.perf_counter() - t0) * 1000.0)
 
 
 def read_tag(name):
@@ -154,6 +195,11 @@ def write_tag(name, value):
 
 def handle_client(conn, addr):
     print(f"[+] Client connected: {addr}")
+    # Send each reply immediately instead of waiting to coalesce packets.
+    try:
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except Exception:
+        pass
     buf = b""
     seq = 0
     try:
@@ -177,6 +223,7 @@ def handle_client(conn, addr):
                 cmd = req.get("cmd")
                 seq += 1
                 reply = None
+                t_cmd = time.perf_counter() if TIMING else 0.0
 
                 if cmd == "read":
                     names = req.get("tags", list(TAGS.keys()) + list(ARRAYS.keys()))
@@ -196,6 +243,9 @@ def handle_client(conn, addr):
 
                 else:
                     reply = {"error": f"unknown cmd: {cmd}"}
+
+                if TIMING:
+                    _rec(f"cmd_{cmd}", (time.perf_counter() - t_cmd) * 1000.0)
 
                 reply["seq"] = seq
                 reply["ts"] = time.time()
@@ -217,6 +267,9 @@ def main():
     srv.bind((host, port))
     srv.listen(5)
     print(f"TCP server listening on {host}:{port}")
+    if TIMING:
+        print("PLC_TIMING=1: timing report every 10 s")
+        threading.Thread(target=_timing_reporter, daemon=True).start()
     print("Waiting for ROS 2 bridge to connect...")
 
     try:

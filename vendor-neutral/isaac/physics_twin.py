@@ -107,12 +107,12 @@ class PhysicsTwin(Node):
         sp_qos = QoSProfile(
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         self.create_subscription(
             JointState, "/servo_setpoints", self.on_setpoint, sp_qos
         )
-        self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
+        self.js_pub = self.create_publisher(JointState, "/joint_states", 1)
 
         self.get_logger().info(
             f"PhysicsTwin ready. DOF={DOF_ORDER}. gravity=ENABLED"
@@ -227,12 +227,15 @@ async def main():
                     await omni.kit.app.get_app().next_update_async()
                     continue
 
-            node.step()
-            node.publish_states()
+            # Receive FIRST, then apply, then publish: a setpoint that
+            # arrived since the last frame is applied in THIS frame instead
+            # of waiting one extra frame.
             try:
                 rclpy.spin_once(node, timeout_sec=0.0)
             except Exception:
                 pass
+            node.step()
+            node.publish_states()
             await omni.kit.app.get_app().next_update_async()
     finally:
         try:

@@ -12,12 +12,13 @@ from datetime import datetime, timezone
 import rclpy
 import rclpy.executors
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSDurabilityPolicy
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Int32, String
 
 from bridge_config import load_bridge_config, ConfigError, CURRENT_SCHEMA_VERSION
 from bridge_logger import setup_logging
+from safety import ESTOP_TOPIC, resolve_estop
 
 
 class _LatencyProbe:
@@ -65,6 +66,10 @@ MSG_TYPES = {"bool": Bool, "int": Int32, "float": Float64, "string": String}
 CAST = {"bool": bool, "int": int, "float": float, "string": str}
 
 JS_STALE_AGE_S = 0.5
+
+PUB_STREAM_QOS = QoSProfile(depth=1)
+SUB_STREAM_QOS = QoSProfile(
+    depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
 
 class PlcDriver(abc.ABC):
@@ -443,6 +448,13 @@ class PlcRosBridge(Node):
             },
         )
 
+        if not self.cfg.estop_forwarding_required:
+            self.log.critical(
+                "estop_forwarding_disabled",
+                extra={"note": "PLC E-stop is NOT forwarded to ROS; "
+                                 "simulation/test use only"},
+            )
+
         driver_name = self.cfg.plc.driver
         self.driver_name = driver_name
         self.driver = DRIVERS[driver_name](self.cfg.plc)
@@ -488,9 +500,6 @@ class PlcRosBridge(Node):
         self.hb_counter = hb.counter
         self.hb_ack     = hb.ack
 
-        # ---- publishers ----
-        # ALL state topics use TRANSIENT_LOCAL so a late-starting
-        # subscriber still receives the last value.
         state_qos = QoSProfile(
             depth=1,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -500,12 +509,6 @@ class PlcRosBridge(Node):
             for p in self.cfg.publish
         ]
 
-        # SINGLE WRITER for /plc/emergency_stop.
-        # If the user listed estop in `publish:`, we REUSE that publisher
-        # instead of creating a second one. Two TRANSIENT_LOCAL publishers
-        # on the same topic cause non-deterministic delivery after
-        # reconnect: an old "True" from pub_estop may outlive a newer
-        # "False" written by _publish.
         self.pub_estop = None
         for p, pub in self.pubs:
             if p.topic == "/plc/emergency_stop":
@@ -525,7 +528,7 @@ class PlcRosBridge(Node):
         self.pub_cmd_ang = None
         if self.cmd_ang:
             self.pub_cmd_ang = self.create_publisher(
-                JointState, robot.cmd_ang_topic, 10
+                JointState, robot.cmd_ang_topic, PUB_STREAM_QOS
             )
 
         self._probe = (
@@ -535,6 +538,9 @@ class PlcRosBridge(Node):
         self._js_tag = ""
         self._js_recv_ns = 0
 
+        # ← FIX: يُحدَّث في نهاية كل tick()، ليصبح origin_ns للدورة التالية
+        self._last_tick_end_ns = None
+
         self.joint_idx = {j: i for i, j in enumerate(self.joints)}
         self._js_lock = threading.Lock()
         self._js_rad = [0.0] * len(self.joints)
@@ -543,7 +549,7 @@ class PlcRosBridge(Node):
         if self.act_ang:
             self.create_subscription(
                 JointState, robot.joint_states_topic,
-                self.on_joint_states, 10,
+                self.on_joint_states, SUB_STREAM_QOS,
             )
 
         self.connected = False
@@ -557,7 +563,7 @@ class PlcRosBridge(Node):
 
         self._watchdog_timeout = self.cfg.watchdog_timeout
         self._last_tick_ok = time.monotonic()
-        self._watchdog_fired = False   # NEW: consumed by tick()
+        self._watchdog_fired = False
         self._watchdog_stop = threading.Event()
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=True, name="plc_watchdog"
@@ -572,6 +578,7 @@ class PlcRosBridge(Node):
         self._slow_sock_sum_ms = 0.0
         self._slow_gap_sum_ms = 0.0
         self._stats_every = max(1, int(self.cfg.poll_hz * 10))
+        self._stats_t0 = time.monotonic()
 
         self._diag_updater = None
         if _HAS_DIAG:
@@ -583,7 +590,12 @@ class PlcRosBridge(Node):
             self.create_timer(1.0, self._diag_updater.update)
 
         poll_hz = self.cfg.poll_hz
-        self.create_timer(1.0 / poll_hz, self.tick)
+        self._poll_period = 1.0 / poll_hz
+        self._io_stop = threading.Event()
+        self._io_thread = threading.Thread(
+            target=self._io_loop, daemon=True, name="plc_io"
+        )
+        self._io_thread.start()
 
         self.log.info(
             "bridge_started",
@@ -607,8 +619,6 @@ class PlcRosBridge(Node):
             return
         if state:
             self._last_tick_ok = time.monotonic()
-            # Clear dedupe caches so the first publication after
-            # reconnect is not suppressed.
             self._last_pub.clear()
             self._last_cmd_ang = None
             self.log.info(
@@ -716,9 +726,6 @@ class PlcRosBridge(Node):
                 )
 
             self._last_tick_ok = time.monotonic()
-            # If the watchdog fired while we were blocked, clear the
-            # dedupe cache so the first estop value read from the PLC is
-            # published even if it matches the pre-watchdog value.
             if self._watchdog_fired:
                 self._last_pub.clear()
                 self._watchdog_fired = False
@@ -760,10 +767,6 @@ class PlcRosBridge(Node):
                     if self.feedback_valid:
                         writes[self.sig[self.feedback_valid]["addr"]] = True
                 elif self.act_ang and not js_fresh:
-                    # joint_states stale — explicitly signal "invalid"
-                    # to PLC. Write cmd_ack=False and feedback_valid=False
-                    # so the PLC can distinguish "robot stopped" from
-                    # "twin is dead".
                     if self.cmd_ack:
                         writes[self.sig[self.cmd_ack]["addr"]] = False
                     if self.feedback_valid:
@@ -796,6 +799,7 @@ class PlcRosBridge(Node):
                     "tick_stats",
                     extra={
                         "ticks": self._tick_count,
+                        "rate_hz": self._measured_rate_hz(),
                         "slow": self._slow_count,
                         "slow_pct": round(
                             100.0 * self._slow_count / self._tick_count, 2),
@@ -807,6 +811,9 @@ class PlcRosBridge(Node):
                 self._slow_sock_sum_ms = 0.0
                 self._slow_gap_sum_ms = 0.0
 
+            # ← FIX: يُسجَّل في نهاية الدورة، ليصبح origin_ns للدورة التالية
+            self._last_tick_end_ns = time.monotonic_ns()
+
         except Exception as e:
             self.log.error(
                 "plc_link_error",
@@ -817,9 +824,22 @@ class PlcRosBridge(Node):
             self._set_connected(False)
             self._last_try = 0.0
 
+    def _warn_estop_unreadable(self, signal):
+        now = time.monotonic()
+        if now - self._warned.get("estop_unreadable", 0.0) > self._warn_cooldown:
+            self._warned["estop_unreadable"] = now
+            self.log.error(
+                "estop_unreadable_failsafe_active",
+                extra={"signal": signal},
+            )
+
     def _publish(self, vals, t_rs=None, t_rd=None):
         for p, pub in self.pubs:
             v = vals.get(p.signal)
+            if p.topic == ESTOP_TOPIC:
+                if v is None:
+                    self._warn_estop_unreadable(p.signal)
+                v = resolve_estop(v)
             if v is None:
                 continue
             cast_v = CAST[p.type](v)
@@ -846,9 +866,34 @@ class PlcRosBridge(Node):
             js.name = list(self.joints)
             js.position = ang
             if self._probe is not None and t_rs is not None:
+                # ← FIX: origin_ns = نهاية الدورة السابقة (queue delay الحقيقي)
+                origin_ns = self._last_tick_end_ns if self._last_tick_end_ns is not None else t_rs
                 js.header.frame_id = (
-                    f"p;{t_rs};{t_rs};{t_rd};{time.monotonic_ns()}")
+                    f"p;{origin_ns};{t_rs};{t_rd};{time.monotonic_ns()}")
             self.pub_cmd_ang.publish(js)
+
+    def _measured_rate_hz(self):
+        now = time.monotonic()
+        dt = now - self._stats_t0
+        self._stats_t0 = now
+        return round(self._stats_every / dt, 1) if dt > 0 else 0.0
+
+    def _io_loop(self):
+        next_t = time.monotonic()
+        while not self._io_stop.is_set():
+            try:
+                self.tick()
+            except Exception as e:
+                try:
+                    self.log.error("io_loop_error", extra={"error": str(e)})
+                except Exception:
+                    pass
+            next_t += self._poll_period
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                self._io_stop.wait(delay)
+            else:
+                next_t = time.monotonic()
 
     def _watchdog_loop(self):
         while not self._watchdog_stop.wait(0.5):
@@ -886,6 +931,11 @@ class PlcRosBridge(Node):
         return stat
 
     def destroy_node(self):
+        self._io_stop.set()
+        try:
+            self._io_thread.join(timeout=2.0)
+        except Exception:
+            pass
         self._watchdog_stop.set()
         try:
             self._watchdog_thread.join(timeout=1.0)

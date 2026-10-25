@@ -10,8 +10,9 @@ import time
 import numpy as np
 import yaml
 import rclpy
+import rclpy.executors
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSDurabilityPolicy
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy, QoSReliabilityPolicy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 
@@ -192,15 +193,12 @@ class TrajectoryTwin(Node):
             ros_logger=self.get_logger(),
         )
 
-        self.setpoint_pub = self.create_publisher(JointState, "/servo_setpoints", 10)
+        self.setpoint_pub = self.create_publisher(JointState, "/servo_setpoints", 1)
         self.lock = threading.Lock()
         self._actual = np.zeros(self.dof)
         self._has_actual = False
         self._last_js_t = 0.0
         self._enable = False
-        # Start with estop active — safe default. Until the bridge
-        # publishes its first estop=False (via TRANSIENT_LOCAL, this
-        # happens immediately after subscription), we assume e-stop.
         self._estop = True
         self._cmd_deg = [0.0] * len(self.controlled_joints)
         self._cmd_ok = False
@@ -217,16 +215,15 @@ class TrajectoryTwin(Node):
         self._bad_cmd_logged = False
         self._cmd_tag = ""
 
-        # TRANSIENT_LOCAL: a node that starts after the publisher still
-        # receives the last estop value. Without this, a late-starting
-        # trajectory_twin would never see estop=False.
         state_qos = QoSProfile(
             depth=1,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
         )
 
-        self.create_subscription(JointState, "/joint_states", self.on_js, 10)
-        self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, 10)
+        stream_qos = QoSProfile(
+            depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
+        self.create_subscription(JointState, "/joint_states", self.on_js, stream_qos)
+        self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, stream_qos)
         self.create_subscription(
             Bool, "/plc/axis_enable", self.on_enable, state_qos
         )
@@ -431,8 +428,11 @@ class TrajectoryTwin(Node):
 def main():
     rclpy.init()
     node = TrajectoryTwin()
+    # ← FIX: SingleThreadedExecutor — أفضل من MultiThread في قياساتنا
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
