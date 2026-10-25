@@ -887,9 +887,9 @@ machine's hardware.
 6. For QEMU/KVM: enable `hypervclock`, disable `hpet`, pin vCPUs, then
    re-run.
 
-### Results (this machine)
+### Results (this machine — after fixes, v3.1.2)
 
-Measured on a **different environment** than the reference machine:
+After applying the fixes described in [Roadmap](#roadmap) (v3.1.2):
 
 | Item         | Value                                  |
 | :----------- | :------------------------------------- |
@@ -900,55 +900,71 @@ Measured on a **different environment** than the reference machine:
 | ROS 2        | Jazzy                                  |
 | RMW          | FastDDS                                |
 
-**Full-loop latency** (1,902 samples, `latency_probe: true`):
+**Full-loop latency** (1,881 samples, `latency_probe: true`):
 
 | Stage          | Median   | p95      | p99       | Max        |
 | :------------- | -------: | -------: | --------: | ---------: |
-| `queue_delay`  | 4.67 ms  | 7.06 ms  | 7.66 ms   | 9.53 ms    |
-| `read_net`     | 6.88 ms  | 12.07 ms | 22.46 ms  | 136.33 ms  |
-| `convert_pub`  | 0.06 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
-| `ros_ruckig`   | 6.57 ms  | 22.88 ms | 32.93 ms  | 502.28 ms  |
-| `isaac_step`   | 27.05 ms | 44.18 ms | 49.13 ms  | 8979.56 ms |
-| `ros_back`     | 4.66 ms  | 33.90 ms | 119.96 ms | 163.90 ms  |
-| `write_net`    | 15.72 ms | 25.41 ms | 45.90 ms  | 285.10 ms  |
-| **`total_loop`** | **67.36 ms** | **105.10 ms** | **203.80 ms** | **9514.23 ms** |
+| `queue_delay`  | 5.42 ms  | 7.41 ms  | 8.04 ms   | 10.30 ms   |
+| `read_net`     | 6.73 ms  | 13.08 ms | 46.32 ms  | 118.33 ms  |
+| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
+| `ros_ruckig`   | 8.14 ms  | 21.81 ms | 75.53 ms  | 502.71 ms  |
+| `isaac_step`   | 10.25 ms | 26.11 ms | 30.79 ms  | 103575.93 ms |
+| `ros_back`     | 0.37 ms  | 1.83 ms  | 2.64 ms   | 3.33 ms    |
+| `write_net`    | 12.15 ms | 20.61 ms | 36.79 ms  | 132.64 ms  |
+| **`total_loop`** | **47.20 ms** | **67.28 ms** | **151.49 ms** | **104091.64 ms** |
 
-**LBP (Latency Bound Probability) — this machine:**
+**LBP (Latency Bound Probability) — this machine (after fixes):**
 
 | Threshold | LBP    |
 | :-------- | -----: |
 | <= 20 ms  | 0.00%  |
-| <= 50 ms  | 6.78%  |
-| <= 80 ms  | 75.45% |
-| <= 100 ms | 94.01% |
-| <= 200 ms | 98.69% |
+| <= 30 ms  | 5.10%  |
+| <= 40 ms  | 37.59% |
+| <= 50 ms  | 63.37% |
+| <= 80 ms  | 96.60% |
+| <= 100 ms | 97.24% |
+| <= 200 ms | 99.89% |
 
 **Filtered (remove top 1% outliers):**
 
 | Metric | Value     |
 | :----- | --------: |
-| n      | 1,883     |
-| median | 67.28 ms  |
-| p95    | 100.10 ms |
-| max    | 203.80 ms |
+| n      | 1,863     |
+| median | 47.01 ms  |
+| p95    | 64.51 ms  |
+| max    | 151.49 ms |
+
+**Comparison: before vs after fixes**
+
+| Stage          | Before (v3.1.1) | After (v3.1.2) | Improvement |
+| :------------- | --------------: | -------------: | ----------: |
+| `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
+| `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
+| `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
+| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (DDS)  |
+| `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
+| `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
+| `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
+| **`total_loop`** | **67.36 ms**  | **47.20 ms**   | **−30%** ✅ |
+| LBP ≤ 50 ms    | 6.78%           | **63.37%**     | **+56.59%** ✅ |
+| LBP ≤ 80 ms    | 75.45%          | **96.60%**     | **+21.15%** ✅ |
+
+**What changed (v3.1.2):**
+
+1. **`plc_ros_bridge.py`** — PLC I/O moved to a **dedicated thread** (`_io_loop`), separate from the ROS executor. This eliminates the contention between `tick()` (PLC I/O) and `on_joint_states()` (ROS callback). Result: `ros_back` −92%, `total_loop` −30%.
+2. **`plc_ros_bridge.py`** — `_last_tick_end_ns` recorded at the end of each `tick()`, so `origin_ns` reflects the end of the previous tick (queue delay measurable). Before: `queue_delay = 0.00` (meaningless).
+3. **`physics_twin.py`** — `rclpy.spin_once()` moved **before** `step()` and `publish_states()`, so a setpoint that arrived since the last frame is applied in **this** frame. Result: `isaac_step` −62%.
+4. **`trajectory_twin.py`** — `SingleThreadedExecutor` (was `MultiThreadedExecutor`). MultiThread added overhead on `ros_ruckig` (+26%) without improving `isaac_step`.
+5. **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams (`/plc/cmd_ang`, `/servo_setpoints`, `/joint_states`). Old samples are dropped instead of queued.
 
 **Interpretation:**
 
-- The VM adds **~4×** latency compared to the reference machine
-  (median 67 ms vs ~15 ms).
-- The dominant contributors are `isaac_step` (~27 ms) and `write_net`
-  (~16 ms), both tied to the shared CPU and the Docker-mediated PLC
-  server.
-- `convert_pub` (0.06 ms) and `queue_delay` (4.67 ms) are close to the
-  reference machine — the bridge-side code is **not** the bottleneck.
-- The **single outlier** (`max = 9514 ms`) is a 6 s PLC link drop,
-  documented in [Known Limitations](#known-limitations)
-  (server-side stalls). It is excluded from the filtered statistics.
+- The VM is still **~3× slower** than the reference machine (47 ms vs ~15 ms).
+- The dominant remaining contributors are `write_net` (~12 ms) and `isaac_step` (~10 ms). Both are tied to the **QEMU/KVM environment**: PLCSIM Advanced API on Windows VM and Isaac Sim physics step on shared vCPU.
+- `convert_pub` (0.05 ms) and `queue_delay` (5.42 ms) are close to the reference machine — the bridge-side code is **not** the bottleneck.
+- The single outlier (`max = 103575 ms`) is a **103-second stall** in Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded from the filtered statistics.
 
-**Conclusion:** the platform is **functionally correct** on this
-environment (29/29 tests pass, tracking error ≤ 0.03°, 60 Hz loop
-sustained), but the **latency numbers** in the main Results section are
-**not reproducible** on a VM. Users must measure on their own hardware.
+**Conclusion:** the fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is environmental (VM), not algorithmic.
 
 ---
 
