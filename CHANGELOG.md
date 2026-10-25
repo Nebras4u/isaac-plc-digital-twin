@@ -55,6 +55,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.1] — 2026-10-25 — Environment Transparency and Real VM Results
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Added
+
+- **`Environment` section in README** — explains that the reference
+  latency numbers (5.2 ms mean, 16.3 ms max) were measured on the
+  author's native Ubuntu 24.04 machine and are **not reproducible on a
+  VM or Docker environment**. Provides a table of the reference machine's
+  characteristics and instructions for measuring on the reader's hardware.
+- **`Results (this machine)` section in README** — 1,902 samples from a
+  Docker / RTX 5060 / shared-vCPU environment with PLCSIM Advanced over
+  TCP/JSON. Median full-loop latency **67.36 ms**, p95 **105.10 ms**,
+  p99 **203.80 ms**. Filtered (top 1% removed): median **67.28 ms**,
+  p95 **100.10 ms**, max **203.80 ms**.
+- **`Articulation.initialize()` hang** documented in *Known Limitations*
+  — on Isaac Sim 5.1, the call may hang if Play has not been pressed at
+  least once. Workaround: press Play and re-run `physics_twin.py`.
+- **ROS 2 Bridge environment** documented in *Quick Start* — Isaac Sim
+  5.1 ships its own Python 3.11 and its own ROS 2 libraries. Users must
+  set `ROS_DISTRO`, `RMW_IMPLEMENTATION`, and `LD_LIBRARY_PATH` before
+  starting Isaac Sim, and must **not** `source /opt/ros/jazzy/setup.bash`
+  (which would point Isaac Sim to the system `rclpy`, Python 3.12, and
+  cause an ABI mismatch).
+- **Single 6 s link-drop outlier** documented — one sample in the VM run
+  produced a 9514 ms full-loop latency (a 6 s PLC link drop). Excluded
+  from the filtered statistics; tracked as VL-08.
+- **`latency_probe` `origin_ns` fix** documented in the *Roadmap* — the
+  column now reflects the end of the previous tick (so queue delay is
+  measurable), instead of being a duplicate of `read_start_ns`.
+
+### Changed
+
+- **Tests badge: 26 → 29.** Three new tests cover the E-stop forwarding
+  rule (`test_estop_forwarding_required`, `test_estop_forwarding_optout`,
+  `test_estop_forwarding_present`).
+- **Schema badge: 2.0 → 2.1.** The config schema now enforces E-stop
+  forwarding (opt-out for tests via `estop_forwarding_required: false`).
+- **Latency badges renamed** to "Reference mean latency" and
+  "Reference max latency" to make it explicit that the numbers depend on
+  the environment.
+- **`Supported Combinations`** table now labels reference numbers with
+  `(ref)` to avoid implying they are universal.
+
+### Fixed
+
+- **README badge list** — no functional change; just clarifying labels
+  for the reference numbers.
+
+### Known Limitations
+
+| ID | Limitation |
+| :--- | :--- |
+| VL-08 | VM environment produces a 9514 ms outlier (6 s PLC link drop) — a single sample, excluded from the filtered statistics |
+| VL-09 | `isaac_step` on the VM environment is ~27 ms (vs 3–13 ms on the reference machine) — tied to shared CPU and Docker overhead |
+| VL-10 | `write_net` on the VM environment is ~16 ms (vs 4.5 ms on the reference machine) — tied to the Docker-mediated PLC server |
+| VL-11 | CycloneDDS is **not** supported on this branch's Isaac Sim setup, because Isaac Sim 5.1 uses its internal Python 3.11 ROS 2 libraries while `plc_ros_bridge` and `trajectory_twin` use system Python 3.12 |
+
+### Migration Notes
+
+No migration is required. The config schema version bumps from `2.0` to
+`2.1`, but v2.0 configs are still accepted and migrated in-memory. The
+only behavioral change is the E-stop forwarding rule, which is enforced
+unless `estop_forwarding_required: false` is set (intended for tests).
+
+---
+
+## [3.1.0] — 2026-10-21 — Production-Grade Config
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Added
+
+- **Pydantic v2 schema** (`bridge_config.py`) — replaces the hand-written
+  `_validate_config`. Declarative, `extra="forbid"`, field ranges via
+  `Field(gt=, le=)`, cross-reference validation with **field location**
+  (`robot.cmd_ang[0]`), direction sanity, address safety (rejects
+  `\x00`, `\n`, `\r`, `..`).
+- **`schema_version` + migration chain** — v1.0 configs work unchanged.
+- **Audit trail** — `sha256` hash + ISO-8601 timestamp logged to JSONL
+  on every startup.
+- **Fail-fast** — bad config rejected **before** any socket is opened.
+- **`robot.yaml` validation** — `_validate_limits`, Ruckig parameter
+  sanity.
+- **26 unit tests** (`pytest tests/ -v` → 26 passed in 0.17 s):
+  19 for config schema (`test_bridge_config.py`), 7 for trajectory
+  planner (`test_trajectory_twin.py`).
+- **`requirements-dev.txt` + `pytest.ini`** — repeatable test setup.
+- **PEP 668 aware** — documented venv workflow for Python 3.11+.
+
+### Changed
+
+- `bridge_config.py` is now the canonical schema definition; the previous
+  hand-written validator is removed.
+
+---
+
 ## [3.0.0] — 2026-10-10 — Vendor-Neutral Platform
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
@@ -191,6 +289,8 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | v1.0.0 | KUKA KR210 | TCP/JSON | 5 processes | `archive/v1.0-kuka/` |
 | v0.2.0 | Yaskawa GP110 | OPC UA | Modular (6 files) | `archive/v0.2-yaskawa/` |
 | **v3.0.0** | **Any robot** | **Any transport** | **Vendor-neutral** | **`vendor-neutral/`** |
+| **v3.1.0** | **Any robot** | **Any transport** | **Vendor-neutral + Pydantic v2 + 26 tests** | **`vendor-neutral/`** |
+| **v3.1.1** | **Any robot** | **Any transport** | **+ Environment transparency + real VM results + 29 tests** | **`vendor-neutral/`** |
 
 ---
 
