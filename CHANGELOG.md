@@ -11,12 +11,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
 
+_Nothing yet._
+
+---
+
+## [3.1.2] — 2026-10-25 — Performance Fixes for VM Environments
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Changed
+
+- **`plc_ros_bridge.py` — PLC I/O moved to a dedicated thread.**
+  Previously, `tick()` (PLC I/O) and `on_joint_states()` (ROS callback)
+  ran on the same `SingleThreadedExecutor`. A slow PLC read (6–7 ms)
+  delayed the delivery of `/joint_states`, which inflated `ros_back`
+  to ~4.7 ms. Now `tick()` runs in `_io_loop` on a separate thread,
+  and `on_joint_states()` is delivered immediately.
+  **Result:** `ros_back` −92% (4.66 → 0.37 ms), `total_loop` −30%
+  (67.36 → 47.20 ms).
+
+- **`plc_ros_bridge.py` — `_last_tick_end_ns` for real queue delay.**
+  Previously, `origin_ns` was a duplicate of `read_start_ns`, so
+  `queue_delay` was always 0.00 ms. Now `_last_tick_end_ns` is recorded
+  at the end of each `tick()`, and `origin_ns` uses it. The queue delay
+  (time between the end of the previous tick and the start of the current
+  read) is now measurable.
+  **Result:** `queue_delay` = 5.42 ms median (was 0.00).
+
+- **`physics_twin.py` — `spin_once` before `step`/`publish_states`.**
+  Previously, `spin_once` ran **after** `step()` and `publish_states()`,
+  so a setpoint that arrived since the last frame waited one extra frame
+  before being applied. Now `spin_once` runs first, and the setpoint is
+  applied in the same frame.
+  **Result:** `isaac_step` −62% (27.05 → 10.25 ms).
+
+- **`trajectory_twin.py` — `SingleThreadedExecutor` (was `MultiThreaded`).**
+  `MultiThreadedExecutor` showed higher `ros_ruckig` (10.99 ms) than
+  `SingleThreadedExecutor` (8.14 ms) in a direct comparison, without
+  improving `isaac_step`, so it was reverted.
+  **Note:** the v3.1.1 baseline for `ros_ruckig` was 6.57 ms, so the net
+  change against v3.1.1 is +24%. This is not yet explained (see `VL-16`).
+
+- **QoS — `BEST_EFFORT` + `depth=1` on high-rate streams.**
+  `/plc/cmd_ang`, `/servo_setpoints`, `/joint_states` now use
+  `BEST_EFFORT` with `depth=1`. Old samples are dropped instead of
+  queued, which reduces `queue_delay` on slow consumers.
+
+### Fixed
+
+- **`latency_probe` `origin_ns`** — now reflects the end of the previous
+  tick, not a duplicate of `read_start_ns`.
+
+### Known Limitations
+
+| ID | Limitation |
+| :--- | :--- |
+| VL-12 | `write_net` is ~12 ms on the VM (PLCSIM Advanced API on Windows guest). Reduce by switching to `plc_api` driver (PLCSIM direct) if the bridge runs on Windows. |
+| VL-13 | `isaac_step` is ~10 ms on the VM (shared vCPU). Reduce by enabling GPU passthrough or running Isaac Sim on a native host. |
+| VL-14 | One 103 s Isaac Sim stall observed (Play/Pause or re-init). Excluded from filtered statistics; root cause not yet investigated. |
+| VL-15 | CycloneDDS is not supported on this branch's Isaac Sim setup (Python 3.11 vs 3.12 mismatch). Use FastDDS on all nodes. |
+| VL-16 | `ros_ruckig` median rose from 6.57 ms (v3.1.1) to 8.14 ms (v3.1.2). Cause not verified (earlier note attributed it to DDS without a measurement). Re-measure with the same executor/QoS settings before drawing conclusions. |
+
+### Migration Notes
+
+No migration is required. The config schema is unchanged (v2.1). The
+only behavioral change is the QoS downgrade on high-rate streams, which
+is transparent to existing subscribers (RELIABLE publishers remain
+compatible with BEST_EFFORT subscribers).
+
+---
+
+## [3.1.1] — 2026-10-23 — Environment Transparency and Real VM Results
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
 ### Changed
 
 - `krc_twin.py` replaced by `trajectory_twin.py` — a vendor-neutral Ruckig
   trajectory generator and state machine that reads joints, limits, and
   Ruckig parameters from `config/robot.yaml` (closes **VL-01**).
 - README Quick Start updated: `trajectory_twin.py --ros-args -p robot:=...`.
+- Unit tests: 26 → 29 (config schema, migration, E-stop forwarding,
+  Ruckig parameter validation).
+- Config schema badge: 2.0 → 2.1. Latency badges renamed to
+  "Reference ..." to avoid implying universal numbers.
 
 ### Fixed
 
@@ -39,6 +117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Added an **Environment** section and **Results (this machine)** with
+  real Docker / RTX 5060 numbers.
+- Documented the `Articulation.initialize()` hang on Isaac Sim 5.1 and the
+  ROS 2 Bridge environment (Python 3.11 vs 3.12).
+- Documented the `latency_probe` `origin_ns` fix and the CycloneDDS caveat.
 - Added a **Safety Notice** to the README: the e-stop, heartbeat, and
   watchdog logic is functional monitoring for the simulated robot and is
   **not a certified safety function** (IEC 61508 / ISO 13849-1 /
@@ -51,75 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | :--- | :--- |
 | VL-01 | ~~KRC twin reads config inline~~ — resolved by `trajectory_twin.py` |
 | VL-06 | Fixes above verified with stubbed ROS 2 / Ruckig only; not yet re-tested on Isaac Sim or PLCSIM Advanced |
-| VL-07 | No automated tests yet for the planner state machine (the stub test is the starting point) |
-
----
-
-## [3.1.1] — 2026-10-25 — Environment Transparency and Real VM Results
-
-**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
-
-### Added
-
-- **`Environment` section in README** — explains that the reference
-  latency numbers (5.2 ms mean, 16.3 ms max) were measured on the
-  author's native Ubuntu 24.04 machine and are **not reproducible on a
-  VM or Docker environment**. Provides a table of the reference machine's
-  characteristics and instructions for measuring on the reader's hardware.
-- **`Results (this machine)` section in README** — 1,902 samples from a
-  Docker / RTX 5060 / shared-vCPU environment with PLCSIM Advanced over
-  TCP/JSON. Median full-loop latency **67.36 ms**, p95 **105.10 ms**,
-  p99 **203.80 ms**. Filtered (top 1% removed): median **67.28 ms**,
-  p95 **100.10 ms**, max **203.80 ms**.
-- **`Articulation.initialize()` hang** documented in *Known Limitations*
-  — on Isaac Sim 5.1, the call may hang if Play has not been pressed at
-  least once. Workaround: press Play and re-run `physics_twin.py`.
-- **ROS 2 Bridge environment** documented in *Quick Start* — Isaac Sim
-  5.1 ships its own Python 3.11 and its own ROS 2 libraries. Users must
-  set `ROS_DISTRO`, `RMW_IMPLEMENTATION`, and `LD_LIBRARY_PATH` before
-  starting Isaac Sim, and must **not** `source /opt/ros/jazzy/setup.bash`
-  (which would point Isaac Sim to the system `rclpy`, Python 3.12, and
-  cause an ABI mismatch).
-- **Single 6 s link-drop outlier** documented — one sample in the VM run
-  produced a 9514 ms full-loop latency (a 6 s PLC link drop). Excluded
-  from the filtered statistics; tracked as VL-08.
-- **`latency_probe` `origin_ns` fix** documented in the *Roadmap* — the
-  column now reflects the end of the previous tick (so queue delay is
-  measurable), instead of being a duplicate of `read_start_ns`.
-
-### Changed
-
-- **Tests badge: 26 → 29.** Three new tests cover the E-stop forwarding
-  rule (`test_estop_forwarding_required`, `test_estop_forwarding_optout`,
-  `test_estop_forwarding_present`).
-- **Schema badge: 2.0 → 2.1.** The config schema now enforces E-stop
-  forwarding (opt-out for tests via `estop_forwarding_required: false`).
-- **Latency badges renamed** to "Reference mean latency" and
-  "Reference max latency" to make it explicit that the numbers depend on
-  the environment.
-- **`Supported Combinations`** table now labels reference numbers with
-  `(ref)` to avoid implying they are universal.
-
-### Fixed
-
-- **README badge list** — no functional change; just clarifying labels
-  for the reference numbers.
-
-### Known Limitations
-
-| ID | Limitation |
-| :--- | :--- |
-| VL-08 | VM environment produces a 9514 ms outlier (6 s PLC link drop) — a single sample, excluded from the filtered statistics |
-| VL-09 | `isaac_step` on the VM environment is ~27 ms (vs 3–13 ms on the reference machine) — tied to shared CPU and Docker overhead |
-| VL-10 | `write_net` on the VM environment is ~16 ms (vs 4.5 ms on the reference machine) — tied to the Docker-mediated PLC server |
-| VL-11 | CycloneDDS is **not** supported on this branch's Isaac Sim setup, because Isaac Sim 5.1 uses its internal Python 3.11 ROS 2 libraries while `plc_ros_bridge` and `trajectory_twin` use system Python 3.12 |
-
-### Migration Notes
-
-No migration is required. The config schema version bumps from `2.0` to
-`2.1`, but v2.0 configs are still accepted and migrated in-memory. The
-only behavioral change is the E-stop forwarding rule, which is enforced
-unless `estop_forwarding_required: false` is set (intended for tests).
+| VL-07 | No automated tests yet for the planner state-machine transitions (the stub test is the starting point) |
 
 ---
 
@@ -182,8 +197,8 @@ unless `estop_forwarding_required: false` is set (intended for tests).
 ### Preserved
 
 - All previous generations moved to `archive/`:
-  - `archive/v1.0-kuka/` — KUKA KR210 (TCP/JSON)
-  - `archive/v0.2-yaskawa/` — Yaskawa GP110 (OPC UA)
+  - `archive/kuka/` — KUKA KR210 (TCP/JSON)
+  - `archive/yaskawa/` — Yaskawa GP110 (OPC UA)
 
 ### Migration Notes
 
@@ -197,7 +212,7 @@ unless `estop_forwarding_required: false` is set (intended for tests).
 
 | ID | Limitation |
 | :--- | :--- |
-| VL-01 | KRC twin still reads config inline; `robot.yaml` is not consumed yet |
+| VL-01 | KRC twin still reads config inline; `robot.yaml` is not consumed yet (resolved in 3.1.1) |
 | VL-02 | Yaskawa GP110 end-to-end verification on this branch is pending |
 | VL-03 | No Cartesian motion or inverse kinematics layer |
 | VL-04 | No real-time guarantees (no PREEMPT_RT) |
@@ -207,7 +222,7 @@ unless `estop_forwarding_required: false` is set (intended for tests).
 
 ## [2.0.0] — 2026-10-07 — Yaskawa Modular
 
-**Location:** [`archive/v0.2-yaskawa/`](archive/v0.2-yaskawa/) — Gen 2
+**Location:** [`archive/yaskawa/`](archive/yaskawa/) — Gen 2
 
 ### Changed (Breaking)
 
@@ -231,7 +246,7 @@ unless `estop_forwarding_required: false` is set (intended for tests).
 
 ## [1.0.0] — 2026-09-15 — KUKA KR210 Full Digital Twin
 
-**Location:** [`archive/v1.0-kuka/`](archive/v1.0-kuka/) — Gen 1
+**Location:** [`archive/kuka/`](archive/kuka/) — Gen 1
 
 ### Added
 
@@ -276,7 +291,7 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 
 ### Notes
 
-- Superseded by v0.2.0 (Yaskawa migration)
+- Superseded by 1.0.0 (full KUKA digital twin)
 - Preserved as historical reference
 
 ---
@@ -286,11 +301,12 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | Version | Robot | Transport | Architecture | Location |
 | :--- | :--- | :--- | :--- | :--- |
 | v0.1.0 | KUKA KR210 | TCP/JSON | Monolithic | (superseded) |
-| v1.0.0 | KUKA KR210 | TCP/JSON | 5 processes | `archive/v1.0-kuka/` |
-| v0.2.0 | Yaskawa GP110 | OPC UA | Modular (6 files) | `archive/v0.2-yaskawa/` |
+| v1.0.0 | KUKA KR210 | TCP/JSON | 5 processes | `archive/kuka/` |
+| v2.0.0 | Yaskawa GP110 | OPC UA | Modular (6 files) | `archive/yaskawa/` |
 | **v3.0.0** | **Any robot** | **Any transport** | **Vendor-neutral** | **`vendor-neutral/`** |
 | **v3.1.0** | **Any robot** | **Any transport** | **Vendor-neutral + Pydantic v2 + 26 tests** | **`vendor-neutral/`** |
-| **v3.1.1** | **Any robot** | **Any transport** | **+ Environment transparency + real VM results + 29 tests** | **`vendor-neutral/`** |
+| **v3.1.1** | **Any robot** | **Any transport** | **+ `trajectory_twin.py`, environment transparency, 29 tests** | **`vendor-neutral/`** |
+| **v3.1.2** | **Any robot** | **Any transport** | **+ threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes** | **`vendor-neutral/`** |
 
 ---
 
@@ -308,8 +324,8 @@ This project uses [Semantic Versioning](https://semver.org/):
 
 - **Repository:** https://github.com/Nebras4u/isaac-plc-digital-twin
 - **Gen 3 (active):** [`vendor-neutral/`](vendor-neutral/)
-- **Gen 2 (reference):** [`archive/v0.2-yaskawa/`](archive/v0.2-yaskawa/)
-- **Gen 1 (reference):** [`archive/v1.0-kuka/`](archive/v1.0-kuka/)
+- **Gen 2 (reference):** [`archive/yaskawa/`](archive/yaskawa/)
+- **Gen 1 (reference):** [`archive/kuka/`](archive/kuka/)
 
 ***
 
