@@ -528,6 +528,14 @@ state and rarely change.
 
 ### `config/robot.yaml` — Robot description
 
+> **Note:** The Isaac Sim URDF (`isaac/Main_Robot_L_URDF_tool.urdf`) is a
+> **4-axis approximation** of a KUKA KR210 L150 (6-axis). Links L3+L4 and
+> L5+L6 are merged, masses are scaled to a realistic total of **1410 kg**,
+> and `joint_4` origin matches the PLC tool length (`LF = 89.084 mm`).
+> `joint_5` is present in the URDF (passive physics) but not in
+> `controlled_joints` (not commanded by the PLC). The same code works on
+> the original 6-axis URDF by editing `robot.yaml` only.
+
 Used by `trajectory_twin.py` (and the Isaac physics twin): joints, limits
 (`limits_deg`), Ruckig limits (`ruckig`), drive gains, and Isaac prim paths.
 `all_joints` includes the passive joint (`joint_5`); `controlled_joints`
