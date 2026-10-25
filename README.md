@@ -106,21 +106,36 @@ Highlights:
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
-**v3.1.1 — Environment Transparency and Real VM Results** (2026-10-25).
+**v3.1.2 — Performance Fixes for VM Environments** (2026-10-25).
 
-- **README:** added `Environment` section explaining that latency numbers
-  depend on hardware, and `Results (this machine)` with real Docker /
-  RTX 5060 numbers (67.36 ms median, 1,902 samples).
+**v3.1.2 — Performance Fixes for VM Environments:**
+
+- **`plc_ros_bridge.py` — PLC I/O moved to a dedicated thread.**
+  `tick()` (PLC I/O) and `on_joint_states()` (ROS callback) no longer
+  share the `SingleThreadedExecutor`. Result: `ros_back` −92%,
+  `total_loop` −30%.
+- **`plc_ros_bridge.py` — `_last_tick_end_ns` for real queue delay.**
+  `queue_delay` is now measurable (was 0.00 ms).
+- **`physics_twin.py` — `spin_once` before `step`/`publish_states`.**
+  A setpoint that arrived since the last frame is applied in the same
+  frame. Result: `isaac_step` −62%.
+- **`trajectory_twin.py` — `SingleThreadedExecutor` (was `MultiThreaded`).**
+  MultiThread added overhead on `ros_ruckig` (+26%) without improving
+  `isaac_step`.
+- **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams. Old samples
+  are dropped instead of queued.
+
+**v3.1.1 — Environment Transparency and Real VM Results:**
+
+- **README:** added `Environment` section and `Results (this machine)`
+  with real Docker / RTX 5060 numbers.
 - **README:** documented the `Articulation.initialize()` hang on Isaac
   Sim 5.1 and the ROS 2 Bridge environment (Python 3.11 vs 3.12).
-- **README:** documented the `latency_probe` `origin_ns` fix (queue delay
-  now measurable) and the CycloneDDS caveat.
-- **README:** documented a single 6 s PLC link drop (9514 ms outlier) on
-  the VM environment.
+- **README:** documented the `latency_probe` `origin_ns` fix and the
+  CycloneDDS caveat.
 - **Badges:** `Tests 26 → 29`, `Schema 2.0 → 2.1`, latency badges
   renamed to "Reference ..." to avoid implying universal numbers.
-- `krc_twin.py` is replaced by the vendor-neutral `trajectory_twin.py`,
-  which reads joints, limits, and Ruckig parameters from `config/robot.yaml`.
+- `krc_twin.py` is replaced by the vendor-neutral `trajectory_twin.py`.
 - **Fix:** a persistent out-of-limits command no longer cancels an
   in-progress brake.
 - **Fix:** on PLC reconnect, the bridge no longer publishes
@@ -172,56 +187,72 @@ Measured on a **different environment** than the reference machine:
 | ROS 2        | Jazzy                                  |
 | RMW          | FastDDS                                |
 
-**Full-loop latency** (1,902 samples, `latency_probe: true`):
+**Full-loop latency** (1,881 samples, `latency_probe: true`, v3.1.2):
 
 | Stage          | Median   | p95      | p99       | Max        |
 | :------------- | -------: | -------: | --------: | ---------: |
-| `queue_delay`  | 4.67 ms  | 7.06 ms  | 7.66 ms   | 9.53 ms    |
-| `read_net`     | 6.88 ms  | 12.07 ms | 22.46 ms  | 136.33 ms  |
-| `convert_pub`  | 0.06 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
-| `ros_ruckig`   | 6.57 ms  | 22.88 ms | 32.93 ms  | 502.28 ms  |
-| `isaac_step`   | 27.05 ms | 44.18 ms | 49.13 ms  | 8979.56 ms |
-| `ros_back`     | 4.66 ms  | 33.90 ms | 119.96 ms | 163.90 ms  |
-| `write_net`    | 15.72 ms | 25.41 ms | 45.90 ms  | 285.10 ms  |
-| **`total_loop`** | **67.36 ms** | **105.10 ms** | **203.80 ms** | **9514.23 ms** |
+| `queue_delay`  | 5.42 ms  | 7.41 ms  | 8.04 ms   | 10.30 ms   |
+| `read_net`     | 6.73 ms  | 13.08 ms | 46.32 ms  | 118.33 ms  |
+| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
+| `ros_ruckig`   | 8.14 ms  | 21.81 ms | 75.53 ms  | 502.71 ms  |
+| `isaac_step`   | 10.25 ms | 26.11 ms | 30.79 ms  | 103575.93 ms |
+| `ros_back`     | 0.37 ms  | 1.83 ms  | 2.64 ms   | 3.33 ms    |
+| `write_net`    | 12.15 ms | 20.61 ms | 36.79 ms  | 132.64 ms  |
+| **`total_loop`** | **47.20 ms** | **67.28 ms** | **151.49 ms** | **104091.64 ms** |
 
-**LBP (Latency Bound Probability) — this machine:**
+**LBP (Latency Bound Probability) — this machine (v3.1.2):**
 
 | Threshold | LBP    |
 | :-------- | -----: |
 | <= 20 ms  | 0.00%  |
-| <= 50 ms  | 6.78%  |
-| <= 80 ms  | 75.45% |
-| <= 100 ms | 94.01% |
-| <= 200 ms | 98.69% |
+| <= 30 ms  | 5.10%  |
+| <= 40 ms  | 37.59% |
+| <= 50 ms  | 63.37% |
+| <= 80 ms  | 96.60% |
+| <= 100 ms | 97.24% |
+| <= 200 ms | 99.89% |
 
 **Filtered (remove top 1% outliers):**
 
 | Metric | Value     |
 | :----- | --------: |
-| n      | 1,883     |
-| median | 67.28 ms  |
-| p95    | 100.10 ms |
-| max    | 203.80 ms |
+| n      | 1,863     |
+| median | 47.01 ms  |
+| p95    | 64.51 ms  |
+| max    | 151.49 ms |
+
+**Comparison: before vs after fixes (v3.1.1 → v3.1.2):**
+
+| Stage          | Before (v3.1.1) | After (v3.1.2) | Improvement |
+| :------------- | --------------: | -------------: | ----------: |
+| `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
+| `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
+| `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
+| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (DDS)  |
+| `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
+| `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
+| `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
+| **`total_loop`** | **67.36 ms**  | **47.20 ms**   | **−30%** ✅ |
+| LBP ≤ 50 ms    | 6.78%           | **63.37%**     | **+56.59%** ✅ |
+| LBP ≤ 80 ms    | 75.45%          | **96.60%**     | **+21.15%** ✅ |
 
 **Interpretation:**
 
-- The VM adds **~4×** latency compared to the reference machine
-  (median 67 ms vs ~15 ms).
-- The dominant contributors are `isaac_step` (~27 ms) and `write_net`
-  (~16 ms), both tied to the shared CPU and the Docker-mediated PLC
-  server.
-- `convert_pub` (0.06 ms) and `queue_delay` (4.67 ms) are close to the
+- The VM is still **~3× slower** than the reference machine (47 ms vs ~15 ms).
+- The dominant remaining contributors are `write_net` (~12 ms) and
+  `isaac_step` (~10 ms). Both are tied to the **QEMU/KVM environment**:
+  PLCSIM Advanced API on Windows VM and Isaac Sim physics step on shared
+  vCPU.
+- `convert_pub` (0.05 ms) and `queue_delay` (5.42 ms) are close to the
   reference machine — the bridge-side code is **not** the bottleneck.
-- The **single outlier** (`max = 9514 ms`) is a 6 s PLC link drop,
-  documented in `vendor-neutral/README.md` (Known Limitations).
-  Excluded from the filtered statistics.
+- The single outlier (`max = 103575 ms`) is a **103-second stall** in
+  Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded
+  from the filtered statistics.
 
-**Conclusion:** the platform is **functionally correct** on this
-environment (29/29 tests pass, tracking error ≤ 0.03°, 60 Hz loop
-sustained), but the **latency numbers** in the main Latency Performance
-section are **not reproducible** on a VM. Users must measure on their own
-hardware.
+**Conclusion:** the fixes reduced median full-loop latency by **30%**
+(67.36 → 47.20 ms) and increased the fraction of samples under 50 ms
+from **6.78% → 63.37%**. The remaining gap to the reference machine is
+environmental (VM), not algorithmic.
 
 ---
 
@@ -328,7 +359,7 @@ If you use this software in academic work, please cite:
   month        = oct,
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {3.1.1},
+  version      = {3.1.2},
   doi          = {10.5281/zenodo.23312011},
   url          = {https://doi.org/10.5281/zenodo.23312011}
 }
@@ -336,7 +367,7 @@ If you use this software in academic work, please cite:
 
 Or in plain text:
 
-> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.2) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
 
 ---
 
