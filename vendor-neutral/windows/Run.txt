@@ -1,0 +1,27 @@
+# plc_server_win.py — تشغيل سريع
+
+## PowerShell (الافتراضي، batch مفعّل)
+
+    cd windows
+    python .\plc_server_win.py
+
+## PowerShell — تعطيل batch لهذه الجلسة فقط
+
+    $env:PLC_BATCH = "0"
+    python .\plc_server_win.py
+
+## PowerShell — تغيير اسم الـinstance (افتراضي: "296")
+
+    $env:PLC_INSTANCE = "PLCSIM_1"
+    python .\plc_server_win.py
+
+## ملاحظات
+
+- PLC_BATCH=1 (افتراضي): دفعات (ReadSignals/WriteSignals) — أسرع
+- PLC_BATCH=0: per-tag (ReadDouble/WriteDouble لكل وسم) — أبطأ
+- PLC_TIMING=1 (افتراضي): تقرير توقيت كل 10 ثوانٍ
+- PLC_TIMING=0: بدون تقرير
+
+- إذا كان لديك مشروع PLC واحد فقط، اترك PLC_INSTANCE فارغاً
+  (سيستخدم أول instance متاح).
+- إذا كان لديك عدة مشاريع، حدد الاسم بدقة.

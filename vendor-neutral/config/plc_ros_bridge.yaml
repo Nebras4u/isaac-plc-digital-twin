@@ -72,13 +72,13 @@ publish:
   - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
   - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
 
-poll_hz: 60
+poll_hz: 120
 watchdog_timeout: 4.0
 backoff_max: 30.0
 warn_cooldown: 60.0
 
-latency_probe: false
-latency_probe_file: "latency_probe.csv"
+latency_probe: true
+latency_probe_file: "/tmp/plc_latency.csv"
 
 logging:
   level: INFO

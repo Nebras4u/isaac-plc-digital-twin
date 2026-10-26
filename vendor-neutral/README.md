@@ -10,7 +10,7 @@
 [![Schema](https://img.shields.io/badge/Config%20Schema-v2.1-success)](#configuration)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Reference latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#results)
-[![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#results)
+[![Reference max](https://img.shields.io/badge/Reference%20max%20latency-25.7%20ms%20(batch)-success)](#results)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -88,7 +88,7 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | Isaac Sim      | Native, 60 FPS stable               |
 | ROS 2          | Jazzy                               |
 | RMW            | FastDDS                             |
-| `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
+| `tcp_json`     | msgpack + `TCP_NODELAY` + batch (v3.1.3) |
 
 The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
@@ -947,7 +947,69 @@ machine's hardware.
 6. For QEMU/KVM: enable `hypervclock`, disable `hpet`, pin vCPUs, then
    re-run.
 
-### Results (this machine)
+### v3.1.3 — PLC batch mode + 120 Hz tuning (this machine)
+
+> **Summary:** Two changes reduced median `cmd_to_feedback` from
+> **34.60 ms → 18.55 ms** (−46%) and median `total_loop` from
+> **45.95 ms → 25.72 ms** (−44%) on the same Docker/VM environment.
+> No changes to the ROS graph or the Isaac Sim scene.
+
+**What changed**
+
+1. **`windows/plc_server_win3.py` → `plc_server_win5.py` (batch mode).**
+   The old server issued one PLCSIM API call per tag (`ReadDouble`,
+   `WriteBool`, …). The new server uses `SDataValueByName` +
+   `ReadSignals`/`WriteSignals` to read/write all tags in a single
+   API call. Batch is enabled by default; the environment variable
+   `PLC_BATCH=0` disables it. The self-test verifies that the batch
+   result matches per-tag reads before enabling.
+
+   > **Critical fix:** `EPrimitiveDataType` members are .NET primitive
+   > names (`Double`, `Int32`, `Int16`, `Bool`), **not** Siemens names
+   > (`LReal`, `DInt`, `Int`). The previous server failed its self-test
+   > because it looked for `LReal`/`DInt`/`Int` and fell back to
+   > per-tag calls. The corrected `_TYPE_NAMES` maps `LReal→Double`,
+   > `DInt→Int32`, `Int→Int16`.
+
+2. **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
+   With batch mode, the bridge completes a tick much faster than
+   before (~3 ms of PLC I/O instead of ~15 ms). The previous 60 Hz
+   cap left the CPU idle ~13 ms per tick (`queue_delay ≈ 13 ms`).
+   At 120 Hz, the same work is spread across twice as many ticks;
+   `queue_delay` drops from 13.48 ms to 5.87 ms.
+
+**Impact (same environment, same code, same YAML except `poll_hz`)**
+
+| Metric (p50)      | batch OFF, 60 Hz | batch ON, 60 Hz | **batch ON, 120 Hz** |
+| :---------------- | ---------------: | --------------: | -------------------: |
+| `read_net`        | 6.04 ms          | 1.67 ms         | **1.36 ms**          |
+| `write_net`       | 13.93 ms         | 12.79 ms        | **5.28 ms**          |
+| `queue_delay`     | 6.33 ms          | 13.48 ms        | **5.87 ms**          |
+| `cmd_to_feedback` | 34.60 ms         | 34.34 ms        | **18.55 ms**         |
+| `total_loop`      | 45.95 ms         | 49.69 ms        | **25.72 ms**         |
+
+**Latency Bound Probability (batch ON, 120 Hz, n=1308):**
+
+| Threshold | LBP     |
+| :-------- | ------: |
+| ≤ 20 ms   | 59.17%  |
+| ≤ 30 ms   | 96.33%  |
+| ≤ 40 ms   | 99.85%  |
+| ≤ 50 ms   | 100.00% |
+
+**Remaining bottlenecks (batch ON, 120 Hz, p50):**
+
+| Stage         | p50      | Share |
+| :------------ | -------: | ----: |
+| `isaac_step`  | 9.71 ms  | 38%   |
+| `queue_delay` | 5.87 ms  | 23%   |
+| `write_net`   | 5.28 ms  | 21%   |
+| `ros_ruckig`  | 4.32 ms  | 17%   |
+
+The next optimization targets are Isaac Sim physics step (headless
+mode or GPU passthrough) and the network link to the PLC.
+
+### Results (this machine — after batch + 120 Hz, v3.1.3)
 
 Measured on a **different environment** than the reference machine,
 after the v3.1.2 fixes described below:
@@ -1201,6 +1263,10 @@ but they must be understood before deploying to a physical robot.
   Sim or PLCSIM Advanced.
 - **`VL-07`** — no automated tests yet for the planner state-machine
   transitions.
+### Known Limitations (added in v3.1.3)
+
+- **VL-18** — `poll_hz: 120` requires batch mode in the PLC server. With `PLC_BATCH=0`, revert to `poll_hz: 60`.
+- **VL-19** — Isaac Sim physics step (`isaac_step`, ~10 ms p50) is now the largest single contributor. Reducing it requires GPU passthrough or headless mode.
 
 ### Not Certified
 
@@ -1244,6 +1310,10 @@ This project is **not a certified safety function**. See the
 - [x] **`latency_probe` origin_ns fix** — `origin_ns` now reflects the
       end of the previous tick (queue-delay measurable), not a duplicate
       of `read_start_ns`
+- [x] **v3.1.3** — PLC batch mode + `poll_hz: 120`
+  - Median `cmd_to_feedback`: 34.60 → **18.55 ms** (−46%)
+  - Median `total_loop`: 45.95 → **25.72 ms** (−44%)
+  - LBP ≤ 50 ms: 96.90% → **100.00%**
 
 ### Gen 3.1 — Production-Grade Config (completed)
 
