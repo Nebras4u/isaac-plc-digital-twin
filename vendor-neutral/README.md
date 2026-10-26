@@ -1244,6 +1244,7 @@ but they must be understood before deploying to a physical robot.
   single 9514 ms outlier in `latency_probe.csv`. Excluded from the
   filtered statistics in [Results (this machine)](#results-this-machine).
 
+<<<<<<< HEAD
 ### Performance on VM
 
 - **`write_net` ~12 ms** (PLCSIM Advanced API on a Windows guest).
