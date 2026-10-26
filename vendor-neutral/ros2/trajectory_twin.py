@@ -386,7 +386,13 @@ class TrajectoryTwin(Node):
     def publish(self, positions, cmd_deg=None, actual=None):
         self._msg.header.stamp = self.get_clock().now().to_msg()
         self._msg.position = positions.tolist()
+        # A latency-probe tag travels EXACTLY ONCE: it is attached to the first
+        # setpoint after its command arrived and then cleared. Otherwise a
+        # braking/idle setpoint would carry an old tag and be measured as a
+        # multi-second 'latency'. (Do NOT publish extra setpoints in IDLE just
+        # to carry tags: the physics twin would follow the arm and let it sag.)
         tag = self._cmd_tag
+        self._cmd_tag = ""
         self._msg.header.frame_id = (
             f"{tag};{time.monotonic_ns()}" if tag else "")
         self.setpoint_pub.publish(self._msg)

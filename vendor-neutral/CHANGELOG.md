@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.3] — 2026-10-26 — PLC Batch Mode + 120 Hz Tuning
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Added
+
+- **`windows/plc_server_win5.py` — batch PLC I/O (default ON).**
+  Reads and writes all tags through a single PLCSIM API call
+  (`ReadSignals` / `WriteSignals`) instead of one call per tag.
+  Controlled by the environment variable `PLC_BATCH`:
+  - `PLC_BATCH=1` (default) — batch mode
+  - `PLC_BATCH=0` — per-tag mode (legacy)
+  A startup self-test compares batch results with per-tag reads and
+  falls back to per-tag mode automatically if they disagree.
+
+  **Fixed:** `EPrimitiveDataType` members are .NET primitive names
+  (`Double`, `Int32`, `Int16`, `Bool`), not Siemens names (`LReal`,
+  `DInt`, `Int`). The previous `_TYPE_NAMES` mapping failed its
+  self-test and batch mode was never actually enabled.
+  `_TYPE_NAMES` now maps `LReal→Double`, `DInt→Int32`, `Int→Int16`.
+
+- **`PLC_INSTANCE` environment variable** — overrides the default
+  instance name (`"296"`) without editing the file.
+
+### Changed
+
+- **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
+  With batch I/O the bridge finishes a tick in ~3 ms; the previous
+  60 Hz cap left the CPU idle for ~13 ms per tick. At 120 Hz,
+  `queue_delay` drops from 13.48 ms to 5.87 ms.
+- **`PLC_TIMING` default is now `"1"`** in `plc_server_win5.py` —
+  timing report every 10 s without setting the env var.
+
+### Performance (Docker/VM, same code, same YAML except `poll_hz`)
+
+| Metric (p50)      | Before (batch OFF, 60 Hz) | After (batch ON, 120 Hz) | Δ |
+| :---------------- | ------------------------: | -----------------------: | -: |
+| `read_net`        | 6.04 ms                   | 1.36 ms                  | −77% |
+| `write_net`       | 13.93 ms                  | 5.28 ms                  | −62% |
+| `queue_delay`     | 6.33 ms                   | 5.87 ms                  | −7% |
+| `ros_ruckig`      | 7.89 ms                   | 4.32 ms                  | −45% |
+| `cmd_to_feedback` | 34.60 ms                  | **18.55 ms**             | **−46%** |
+| `total_loop`      | 45.95 ms                  | **25.72 ms**             | **−44%** |
+| LBP ≤ 30 ms       | 40.63%                    | **96.33%**               | +55.7pp |
+| LBP ≤ 40 ms       | 83.73%                    | **99.85%**               | +16.1pp |
+| LBP ≤ 50 ms       | 96.90%                    | **100.00%**              | +3.1pp |
+
+### Fixed
+
+- **`plc_server_win5.py` batch self-test** — `_TYPE_NAMES` now
+  correctly maps Siemens type names to `EPrimitiveDataType`
+  members. Batch mode is actually enabled (previously it silently
+  fell back to per-tag calls).
+
+### Migration Notes
+
+- No config schema change (still v2.1).
+- No ROS graph change.
+- If you use `plc_server_win3.py`, replace it with
+  `plc_server_win5.py`. If you keep the old server, the bridge
+  still works (per-tag), just with higher `write_net`.
+- To disable batch: `PLC_BATCH=0` in the environment before
+  starting `plc_server_win5.py`.
+
+### Known Limitations (added)
+
+| ID | Limitation |
+| :--- | :--- |
+| VL-16 | `poll_hz: 120` requires the PLC server to handle 120 requests/s. With batch mode, `plc_server_win5.py` handles this comfortably (0.3 ms per batch request mean). With per-tag mode, do not exceed `poll_hz: 60`. |
+| VL-17 | Isaac Sim physics step (`isaac_step`, ~10 ms p50) is now the largest single contributor. Reducing it requires GPU passthrough or headless mode. |
+
+---
+
 ## [Unreleased]
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
@@ -286,6 +359,7 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | **v3.0.0** | **Any robot** | **Any transport** | **Vendor-neutral** | **`vendor-neutral/`** |
 | **v3.1.0** | **Any robot** | **Any transport** | **Vendor-neutral + Pydantic v2 + 26 tests** | **`vendor-neutral/`** |
 | **v3.1.1** | **Any robot** | **Any transport** | **+ Environment transparency + real VM results + 29 tests** | **`vendor-neutral/`** |
+| **v3.1.3** | **Any robot** | **Any transport** | **+ PLC batch + 120 Hz tuning (18.55 / 25.72 ms)** | **`vendor-neutral/`** |
 
 ---
 

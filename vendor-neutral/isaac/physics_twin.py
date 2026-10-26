@@ -47,6 +47,10 @@ JOINT_PATHS = {
 }
 PUBLISH_HZ = 60.0
 
+# A latency-probe tag is attached to ONE /joint_states message, and only if
+# its setpoint is this fresh. Never republish an old tag.
+TAG_VALID_S = 0.5
+
 
 # -------------------------------------------------------------------------
 # Helpers
@@ -173,8 +177,13 @@ class PhysicsTwin(Node):
         msg.name = list(DOF_ORDER)
         msg.position = [float(pos[0][i]) for i in range(len(DOF_ORDER))]
         tag = self._applied_tag
-        msg.header.frame_id = f"{tag};{time.monotonic_ns()}" if tag else ""
+        fresh = (time.monotonic() - self._last_sp_t) <= TAG_VALID_S
+        msg.header.frame_id = (
+            f"{tag};{time.monotonic_ns()}" if (tag and fresh) else "")
         self.js_pub.publish(msg)
+        # consume: the tag was used once, so clear every copy of it
+        self._applied_tag = ""
+        self._tag = ""
 
         self._pub_count += 1
         if self._pub_count % 600 == 0:

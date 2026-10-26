@@ -22,8 +22,19 @@ from safety import ESTOP_TOPIC, resolve_estop
 
 
 class _LatencyProbe:
+    """One CSV row per command whose feedback reached the PLC.
+
+    Tag on the wire (every node appends ONE timestamp, all time.monotonic_ns()):
+        bridge  : p;origin;read_start;read_done;cmd_pub
+        traj    : ...;sp_pub
+        physics : ...;js_pub          -> 7 parts in total
+    The bridge adds js_recv (when joint_states arrived) and write_done (when
+    the feedback carrying that tag was written to the PLC).
+    """
     COLS = ["origin_ns", "read_start_ns", "read_done_ns", "cmd_pub_ns",
             "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns"]
+    _N_PARTS = 7
+    _FLUSH_EVERY_S = 1.0
 
     def __init__(self, path):
         self._f = open(path, "w", newline="")
@@ -31,20 +42,33 @@ class _LatencyProbe:
         self._w.writerow(self.COLS)
         self._f.flush()
         self._last = None
+        self._last_flush = time.monotonic()
+        self.rows = 0
+        self.rejected = 0          # malformed tags
+        self.order_violations = 0  # timestamps not non-decreasing along the chain
 
     def record(self, tag, js_recv_ns, write_done_ns):
-        parts = tag.split(";")
-        if len(parts) != 7 or parts[0] != "p":
+        parts = tag.split(";")[: self._N_PARTS]
+        if len(parts) != self._N_PARTS or parts[0] != "p":
+            self.rejected += 1
             return False
         try:
             nums = [int(x) for x in parts[1:]]
         except ValueError:
+            self.rejected += 1
             return False
-        if nums[0] == self._last:
+        if nums[0] == self._last:      # same command already recorded
             return False
         self._last = nums[0]
-        self._w.writerow(nums + [js_recv_ns, write_done_ns])
-        self._f.flush()
+        chain = nums + [js_recv_ns, write_done_ns]
+        if any(b < a for a, b in zip(chain, chain[1:])):
+            self.order_violations += 1  # still written, but counted
+        self._w.writerow(chain)
+        self.rows += 1
+        now = time.monotonic()
+        if now - self._last_flush >= self._FLUSH_EVERY_S:
+            self._f.flush()             # buffered: no disk flush per row
+            self._last_flush = now
         return True
 
     def close(self):
@@ -66,6 +90,10 @@ MSG_TYPES = {"bool": Bool, "int": Int32, "float": Float64, "string": String}
 CAST = {"bool": bool, "int": int, "float": float, "string": str}
 
 JS_STALE_AGE_S = 0.5
+
+# A probe tag older than this when its feedback is written is NOT recorded
+# (it would measure a stale/old command, not the loop).
+PROBE_MAX_AGE_NS = 250_000_000
 
 PUB_STREAM_QOS = QoSProfile(depth=1)
 SUB_STREAM_QOS = QoSProfile(
@@ -537,6 +565,7 @@ class PlcRosBridge(Node):
         )
         self._js_tag = ""
         self._js_recv_ns = 0
+        self._probe_sent = 0
 
         # ← FIX: يُحدَّث في نهاية كل tick()، ليصبح origin_ns للدورة التالية
         self._last_tick_end_ns = None
@@ -605,8 +634,10 @@ class PlcRosBridge(Node):
     def on_joint_states(self, msg):
         with self._js_lock:
             if self._probe is not None:
-                self._js_tag = msg.header.frame_id
-                self._js_recv_ns = time.monotonic_ns()
+                tag = msg.header.frame_id
+                if tag.startswith("p;"):
+                    self._js_tag = tag
+                    self._js_recv_ns = time.monotonic_ns()
             for name, pos in zip(msg.name, msg.position):
                 i = self.joint_idx.get(name)
                 if i is not None:
@@ -751,6 +782,7 @@ class PlcRosBridge(Node):
                 if self.act_ang and js_fresh:
                     act_written = True
                     probe_tag, probe_recv = self._js_tag, self._js_recv_ns
+                    self._js_tag = ""      # each tag is recorded at most once
                     if len(self.act_ang) == 1:
                         sig = self.act_ang[0]
                         addr = self.sig[sig]["addr"]
@@ -776,8 +808,10 @@ class PlcRosBridge(Node):
                 failed = self.driver.write(writes)
                 if (self._probe is not None and act_written and probe_tag
                         and not failed):
-                    self._probe.record(
-                        probe_tag, probe_recv, time.monotonic_ns())
+                    write_done_ns = time.monotonic_ns()
+                    if write_done_ns - probe_recv <= PROBE_MAX_AGE_NS:
+                        self._probe.record(
+                            probe_tag, probe_recv, write_done_ns)
                 for a in failed:
                     self.log.warning(
                         "write_failed",
@@ -800,6 +834,7 @@ class PlcRosBridge(Node):
                     extra={
                         "ticks": self._tick_count,
                         "rate_hz": self._measured_rate_hz(),
+                        **self._probe_stats(),
                         "slow": self._slow_count,
                         "slow_pct": round(
                             100.0 * self._slow_count / self._tick_count, 2),
@@ -870,7 +905,16 @@ class PlcRosBridge(Node):
                 origin_ns = self._last_tick_end_ns if self._last_tick_end_ns is not None else t_rs
                 js.header.frame_id = (
                     f"p;{origin_ns};{t_rs};{t_rd};{time.monotonic_ns()}")
+                self._probe_sent += 1
             self.pub_cmd_ang.publish(js)
+
+    def _probe_stats(self):
+        p = self._probe
+        if p is None:
+            return {}
+        return {"probe_sent": self._probe_sent, "probe_rows": p.rows,
+                "probe_rejected": p.rejected,
+                "probe_order_violations": p.order_violations}
 
     def _measured_rate_hz(self):
         now = time.monotonic()
