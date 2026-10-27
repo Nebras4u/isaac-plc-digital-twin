@@ -12,7 +12,7 @@
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#control-loop-latency-reference)
 [![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#control-loop-latency-reference)
-[![VM post-v3.1.3](https://img.shields.io/badge/VM%20post--v3.1.3%20p50-18.55%20ms-blueviolet)](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+[![VM post-v3.1.4](https://img.shields.io/badge/VM%20post--v3.1.4%20p50-18.55%20ms-blueviolet)](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -63,7 +63,7 @@ platform.
   - [Bridge Real-Time Behaviour](#bridge-real-time-behaviour)
   - [Clock Drift Calibration](#clock-drift-calibration)
   - [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
-  - [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+  - [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 - [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
 - [Lineage](#lineage)
@@ -93,13 +93,13 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | RMW            | FastDDS                             |
 | `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
 
-> **Note on v3.1.3:** The reference numbers above were measured on the
-> reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
+> **Note on v3.1.4:** The reference numbers above were measured on the
+> reference machine with batch enabled at **60 Hz**. v3.1.4 fixed batch
 > mode on the Windows server (`_TYPE_NAMES` mapping) and raised
 > `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
 > **not** on the reference machine. The reference machine has **not
-> been re-measured** for v3.1.3. See
-> [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> been re-measured** for v3.1.4. See
+> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 > for VM results, which use a different metric (`total_loop` p50) and
 > are not comparable to the mean/max shown above.
 
@@ -107,7 +107,7 @@ The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
 [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
 and
-[v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
+[v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
 This is expected and does not indicate a regression.
 
 **How to measure on your machine:**
@@ -252,8 +252,8 @@ arrived since the last frame is applied in the same frame.
     |   +-- bridge_logger.py              # Structured logging
     |
     +-- ros2/
-    |   +-- analyze_probe.py              # Offline CSV analysis (v3.1.3)
-    |   +-- test_probe_chain.py           # 10 standalone probe tests (v3.1.3)
+    |   +-- analyze_probe.py              # Offline CSV analysis (v3.1.4)
+    |   +-- test_probe_chain.py           # 10 standalone probe tests (v3.1.4)
     |
     +-- tests/
     |   +-- conftest.py
@@ -291,7 +291,7 @@ arrived since the last frame is applied in the same frame.
         +-- latency_full_loop_OPC-UA.md   # Baseline report
         +-- upgrade_report.html           # Session report: Prototype -> Production Grade
 
-> **Note:** The `ros2/` folder was added in v3.1.3 to hold the offline
+> **Note:** The `ros2/` folder was added in v3.1.4 to hold the offline
 > analysis tool (`analyze_probe.py`) and the standalone probe tests
 > (`test_probe_chain.py`). The existing files in `linux/` are unchanged.
 
@@ -624,7 +624,7 @@ the published `JointState` messages still use radians, per ROS convention.
 - `avg_slow_gap_ms > 0` indicates GIL contention (bridge-side).
 - `avg_slow_sock_ms > 0` indicates real server-side stalls (not bridge-side).
 
-**Probe stats (since v3.1.3):** if `latency_probe: true`, the same
+**Probe stats (since v3.1.4):** if `latency_probe: true`, the same
 `tick_stats` line also carries:
 
     probe_sent=1800 probe_rows=649 probe_rejected=0 probe_order_violations=0
@@ -791,9 +791,9 @@ tracking result.*
 
 > **Reference machine only.** All numbers in this section are from the
 > **native Ubuntu 24.04** reference machine described in
-> [Environment](#environment). They predate v3.1.3. See
+> [Environment](#environment). They predate v3.1.4. See
 > [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
-> and [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> and [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 > for VM numbers, which use different metrics and are **not directly
 > comparable**.
 
@@ -812,7 +812,7 @@ optimization).
 
 #### Comparison across transports
 
-> All rows in this table are from the **reference machine**, **pre-v3.1.3**.
+> All rows in this table are from the **reference machine**, **pre-v3.1.4**.
 > They use mean/max, not p50/p95. Do not compare directly with the
 > VM tables below.
 
@@ -832,9 +832,9 @@ optimization).
 | <= 20 ms  | 100%     |
 | <= 50 ms  | 100%     |
 
-**Result:** On the **reference machine** (pre-v3.1.3, native Ubuntu,
+**Result:** On the **reference machine** (pre-v3.1.4, native Ubuntu,
 60 Hz, batch mode enabled), **100% of full-loop samples stayed under
-20 ms**. This remains the canonical reference number. The v3.1.3
+20 ms**. This remains the canonical reference number. The v3.1.4
 numbers on Docker/VM (see below) are a **different environment** and
 are **not directly comparable**.
 
@@ -1025,8 +1025,8 @@ machine's hardware.
 > **Environment:** Docker/VM (Ubuntu 24.04, RTX 5060, shared vCPU,
 > PLCSIM Advanced V6.0, FastDDS). **Not** the reference machine.
 > These are the **v3.1.2** numbers that serve as the baseline for
-> v3.1.3. For the v3.1.3 comparison (batch ON, 120 Hz), see
-> [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
+> v3.1.4. For the v3.1.4 comparison (batch ON, 120 Hz), see
+> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
 
 Measured after the v3.1.2 fixes described below.
 
@@ -1106,7 +1106,7 @@ Measured after the v3.1.2 fixes described below.
 
 **Conclusion:** the v3.1.2 fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is mostly environmental (VM), not algorithmic.
 
-### v3.1.3 — PLC batch mode + 120 Hz tuning (this machine)
+### v3.1.4 — PLC batch mode + 120 Hz tuning (this machine)
 
 > **⚠️ These numbers are from the Docker/VM environment**
 > (Ubuntu 24.04, RTX 5060, shared vCPU, PLCSIM Advanced V6.0).
@@ -1115,8 +1115,8 @@ Measured after the v3.1.2 fixes described below.
 > 16.3 ms max on native Ubuntu).
 >
 > The comparison is valid **within this VM environment**: same code,
-> same YAML except `poll_hz`, measured before and after v3.1.3.
-> The reference machine was **not re-measured** for v3.1.3.
+> same YAML except `poll_hz`, measured before and after v3.1.4.
+> The reference machine was **not re-measured** for v3.1.4.
 
 > **Summary:** On this VM, two changes reduced median `cmd_to_feedback`
 > from **34.60 ms → 18.55 ms** (−46%) and median `total_loop` from
@@ -1215,7 +1215,7 @@ external knob at 60 Hz:
 | Dedicated PLC I/O thread (v3.1.2)| A slow PLC read no longer delays `/joint_states` delivery (`ros_back` −92%)               |
 | `SingleThreadedExecutor`         | ROS callbacks run strictly in sequence; no executor overhead in `trajectory_twin.py`      |
 | `BEST_EFFORT` + `depth=1` QoS    | Old samples are dropped instead of queued on high-rate streams                            |
-| Batch PLC I/O (v3.1.3)           | One PLCSIM API call per request instead of per-tag                                        |
+| Batch PLC I/O (v3.1.4)           | One PLCSIM API call per request instead of per-tag                                        |
 | State-topic publish dedupe       | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state                             |
 | `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive)                                             |
 | Monotonic timing                 | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics                  |
@@ -1253,9 +1253,9 @@ external knob at 60 Hz:
 - Consider OPC UA Subscriptions for change-based updates
 - Set `TCP_NODELAY` on the OPC UA client socket
 
-### Expected Performance (reference machine, pre-v3.1.3)
+### Expected Performance (reference machine, pre-v3.1.4)
 
-> These rows are from the **reference machine**, **pre-v3.1.3**.
+> These rows are from the **reference machine**, **pre-v3.1.4**.
 > They use mean/max, not p50/p95. Do not compare directly with the
 > VM tables above.
 
@@ -1297,7 +1297,7 @@ external knob at 60 Hz:
 | v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests            | `vendor-neutral/`       |
 | v3.1.1  | Any robot     | Any transport     | + `trajectory_twin.py`, environment transparency, 29 tests | `vendor-neutral/` |
 | v3.1.2  | Any robot     | Any transport     | + threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes | `vendor-neutral/`    |
-| v3.1.3  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests | `vendor-neutral/` |
+| v3.1.4  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests | `vendor-neutral/` |
 
 ---
 
@@ -1368,7 +1368,7 @@ but they must be understood before deploying to a physical robot.
   GPU passthrough or a native host.
 - **VL-16** — `ros_ruckig` median rose from 6.57 ms (v3.1.1) to 8.14 ms
   (v3.1.2). Cause not verified; re-measure before drawing conclusions.
-- **VL-18** — `poll_hz: 120` (v3.1.3) requires batch mode in the PLC
+- **VL-18** — `poll_hz: 120` (v3.1.4) requires batch mode in the PLC
   server. With `PLC_BATCH=0`, revert to `poll_hz: 60`.
 - **VL-19** — Isaac Sim physics step (`isaac_step`, ~10 ms p50) is now
   the largest single contributor on the VM. Reducing it requires GPU
@@ -1425,7 +1425,7 @@ This project is **not a certified safety function**. See the
 - [x] **`latency_probe` origin_ns fix** — `origin_ns` now reflects the
       end of the previous tick (queue-delay measurable), not a duplicate
       of `read_start_ns`
-- [x] **v3.1.3** — PLC batch mode + `poll_hz: 120`
+- [x] **v3.1.4** — PLC batch mode + `poll_hz: 120`
   - Median `cmd_to_feedback`: 34.60 → **18.55 ms** (−46%)
   - Median `total_loop`: 45.95 → **25.72 ms** (−44%)
   - LBP ≤ 50 ms: 96.90% → **100.00%** (this VM)
@@ -1462,7 +1462,7 @@ This project is **not a certified safety function**. See the
       `physics_twin.py` (`isaac_step` −62%)
 - [x] **v3.1.2** — `BEST_EFFORT` + `depth=1` QoS on high-rate streams
 - [x] **v3.1.2** — `SingleThreadedExecutor` in `trajectory_twin.py`
-- [x] **v3.1.3** — batch PLC I/O (fixed `_TYPE_NAMES`); `poll_hz` 120;
+- [x] **v3.1.4** — batch PLC I/O (fixed `_TYPE_NAMES`); `poll_hz` 120;
       `analyze_probe.py` + `test_probe_chain.py`
 
 ### In Progress
@@ -1478,7 +1478,7 @@ This project is **not a certified safety function**. See the
 - [ ] Investigate the 103 s Isaac Sim stall (`VL-14`)
 - [ ] Improve VM performance — `write_net` (~12 ms, `VL-12`) and
       `isaac_step` (~10 ms, `VL-13`) on the Docker environment
-- [ ] Re-measure the **reference machine** with v3.1.3 (batch + 120 Hz)
+- [ ] Re-measure the **reference machine** with v3.1.4 (batch + 120 Hz)
       to provide updated canonical numbers
 - [ ] Optional: CycloneDDS support on Isaac Sim (requires internal
       Python 3.11 libraries and `LD_LIBRARY_PATH` — see Known Limitations)
