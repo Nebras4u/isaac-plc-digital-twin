@@ -1,6 +1,6 @@
 # Isaac Digital Twin — Multi-Generation Platform
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312011.svg)](https://doi.org/10.5281/zenodo.23312011)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#latency-performance)
@@ -10,19 +10,15 @@ An industrial-grade **Digital Twin platform** for robot arms driven by
 **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through
 **ROS 2**.
 
-
-
 ![S7-1500T ↔ ROS2 ↔ Isaac Sim](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/yaskawa/docs/images/PLC-ROS2-ISAAC.jpg)
-
-
 
 The repository hosts three generations of the platform, side by side:
 
 | Generation                 | Robot               | Transport                  | Location                                         | Status       |
 | :------------------------- | :------------------ | :------------------------- | :----------------------------------------------- | :----------- |
 | **Gen 3 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api | [`vendor-neutral/`](vendor-neutral/)             | **Active**   |
-| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                     | [`yaskawa/`](yaskawa/)           | Reference    |
-| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                   | [`kuka/`](kuka/)                 | Reference    |
+| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                     | [`yaskawa/`](yaskawa/)                           | Reference    |
+| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                   | [`kuka/`](kuka/)                                 | Reference    |
 
 ---
 
@@ -111,9 +107,21 @@ Highlights:
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
-**v3.1.2 — Performance Fixes for VM Environments** (2026-10-25).
+**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-27).
 
-**v3.1.2 — Performance Fixes for VM Environments:**
+**v3.1.3 — PLC Batch Mode + 120 Hz Tuning:**
+
+- **`plc_ros_bridge.py` — batch mode for PLC I/O.** PLC reads/writes
+  are grouped per control cycle to reduce round-trips and jitter on
+  slow transports.
+- **120 Hz tuning.** Control-loop parameters re-tuned for 120 Hz
+  operation; re-measure latency on your own hardware before comparing
+  against the reference numbers.
+- *(Align the detailed bullets above with the `CHANGELOG.md` v3.1.3
+  entry — this README will reflect the full note once the CHANGELOG is
+  updated.)*
+
+**v3.1.2 — Performance Fixes for VM Environments** (2026-10-25):
 
 - **`plc_ros_bridge.py` — PLC I/O moved to a dedicated thread.**
   `tick()` (PLC I/O) and `on_joint_states()` (ROS callback) no longer
@@ -155,6 +163,10 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
 
 > **Reference machine only.** See [Environment](#environment) and
 > [Results (this machine)](#results-this-machine) for the VM numbers.
+
+> **Note:** the latency tables in this section and the next one were
+> measured on **v3.1.2**. Re-measurement on v3.1.3 (batch mode + 120 Hz
+> tuning) is pending.
 
 Measured across all transports (see
 [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md)
@@ -347,12 +359,12 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
 ## Documentation
 
-| Document                                                                                | Description                                |
-| :-------------------------------------------------------------------------------------- | :----------------------------------------- |
+| Document                                                                                 | Description                                |
+| :--------------------------------------------------------------------------------------- | :----------------------------------------- |
 | [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 3 (active) — vendor-neutral platform   |
 | [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports  |
-| [`archive/kuka/README.md`](archive/kuka/README.md)                                       | Gen 1 — KUKA KR210                         |
-| [`archive/yaskawa/docs/README.md`](archive/yaskawa/docs/README.md)                       | Gen 2 — Yaskawa GP110                      |
+| [`archive/kuka/README.md`](kuka/README.md)                                               | Gen 1 — KUKA KR210                         |
+| [`archive/yaskawa/docs/README.md`](yaskawa/docs/README.md)                               | Gen 2 — Yaskawa GP110                      |
 | [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                            |
 | [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                    |
 
@@ -360,7 +372,8 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
 ## How to Cite
 
-If you use this software in academic work, please cite:
+If you use this software in academic work, please cite **the specific
+version you used** (Version DOI is stable and does not change):
 
 ```bibtex
 @software{damsarkho2026isaac,
@@ -370,15 +383,22 @@ If you use this software in academic work, please cite:
   month        = oct,
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {3.1.2},
-  doi          = {10.5281/zenodo.23312011},
-  url          = {https://doi.org/10.5281/zenodo.23312011}
+  version      = {3.1.3},
+  doi          = {10.5281/zenodo.23672149},
+  url          = {https://doi.org/10.5281/zenodo.23672149}
 }
 ```
 
 Or in plain text:
 
-> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.2) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23672149
+
+> **Note on DOIs:** the badge at the top of this file uses the
+> **Concept DOI** (`10.5281/zenodo.23312011`) — it always resolves to
+> the **latest** release. The citation above uses the **Version DOI**
+> (`10.5281/zenodo.23672149`) — it is pinned to **v3.1.3**. If you want
+> to cite "whatever is latest at the time of reading", use the Concept
+> DOI instead, and omit the `version` field.
 
 ---
 
