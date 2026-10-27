@@ -15,7 +15,7 @@ _Nothing yet._
 
 ---
 
-## [3.1.3] — 2026-10-26 — PLC Batch Mode + 120 Hz Tuning
+## [3.1.4] — 2026-10-26 — PLC Batch Mode + 120 Hz Tuning
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
 
@@ -66,7 +66,7 @@ _Nothing yet._
 ### Performance (Docker/VM — **not** the reference machine)
 
 Same code, same YAML except `poll_hz`. Reference machine was **not
-re-measured** for v3.1.3; the reference numbers (5.2 ms mean,
+re-measured** for v3.1.4; the reference numbers (5.2 ms mean,
 16.3 ms max) still refer to v3.1.2 and earlier.
 
 | Metric (p50)      | batch OFF, 60 Hz | batch ON, 60 Hz | batch ON, 120 Hz |
@@ -95,14 +95,14 @@ re-measured** for v3.1.3; the reference numbers (5.2 ms mean,
 | :--- | :--- |
 | VL-17 | `isaac_step` (~9.71 ms p50) is now the largest single contributor on the Docker/VM. Reducing it requires GPU passthrough or headless mode. |
 | VL-18 | `poll_hz: 120` requires batch mode in the PLC server. With `PLC_BATCH=0`, revert to `poll_hz: 60`. |
-| VL-19 | The reference machine (native Ubuntu 24.04, dedicated cores) has **not** been re-measured with v3.1.3. The reference numbers (5.2 ms mean, 16.3 ms max) still refer to v3.1.2 and earlier. |
+| VL-19 | The reference machine (native Ubuntu 24.04, dedicated cores) has **not** been re-measured with v3.1.4. The reference numbers (5.2 ms mean, 16.3 ms max) still refer to v3.1.2 and earlier. |
 
 ### Migration Notes
 
 - No config schema change (still v2.1).
 - No ROS graph change.
 - If you use `windows/plc_server_win.py` from v3.1.2, replace it with
-  the v3.1.3 version. The bridge still works with the old server
+  the v3.1.4 version. The bridge still works with the old server
   (per-tag), just with higher `write_net`.
 - To disable batch: `PLC_BATCH=0` in the environment before starting
   `plc_server_win.py`.
@@ -401,7 +401,7 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | **v3.1.0** | **Any robot** | **Any transport** | **Vendor-neutral + Pydantic v2 + 26 tests** | **`vendor-neutral/`** |
 | **v3.1.1** | **Any robot** | **Any transport** | **+ `trajectory_twin.py`, environment transparency, 29 tests** | **`vendor-neutral/`** |
 | **v3.1.2** | **Any robot** | **Any transport** | **+ threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes** | **`vendor-neutral/`** |
-| **v3.1.3** | **Any robot** | **Any transport** | **+ batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests** | **`vendor-neutral/`** |
+| **v3.1.4** | **Any robot** | **Any transport** | **+ batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests** | **`vendor-neutral/`** |
 
 ---
 
