@@ -60,12 +60,12 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | RMW            | FastDDS                             |
 | `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
 
-> **Note on v3.1.3:** The reference numbers above were measured on the
-> reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
+> **Note on v3.1.4:** The reference numbers above were measured on the
+> reference machine with batch enabled at **60 Hz**. v3.1.4 fixed batch
 > mode on the Windows server (`_TYPE_NAMES` mapping) and raised
 > `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
 > **not** on the reference machine. The reference machine has **not
-> been re-measured** for v3.1.3. See
+> been re-measured** for v3.1.4. See
 > [`vendor-neutral/README.md`](vendor-neutral/README.md) for the VM
 > comparison, which uses a different metric (`total_loop` p50) and is
 > not directly comparable to the mean/max shown here.
@@ -95,7 +95,7 @@ Highlights:
 
 - 3 transports in one abstraction: `tcp_json`, `opcua`, `plc_api`
 - **Batch PLC I/O** (`ReadSignals`/`WriteSignals` — one API call per
-  request instead of per-tag; v3.1.3)
+  request instead of per-tag; v3.1.4)
 - Robot description in `config/robot.yaml`
 - Signal mapping in `config/plc_ros_bridge.yaml`
 - Ruckig-based online trajectory generation (`trajectory_twin.py`,
@@ -125,9 +125,9 @@ Highlights:
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
-**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-26).
+**v3.1.4 — PLC Batch Mode + 120 Hz Tuning** (2026-10-26).
 
-**v3.1.3 — PLC Batch Mode + 120 Hz Tuning:**
+**v3.1.4 — PLC Batch Mode + 120 Hz Tuning:**
 
 - **`windows/plc_server_win.py` — batch PLC I/O enabled by default.**
   Uses `SDataValueByName` + `ReadSignals`/`WriteSignals` to read/write
@@ -188,7 +188,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
 
 > **Reference machine only.** All numbers in this section are from the
 > **native Ubuntu 24.04** reference machine described in
-> [Environment](#environment). They predate v3.1.3. See
+> [Environment](#environment). They predate v3.1.4. See
 > [Results (this machine)](#results-this-machine) for VM numbers, which
 > use different metrics and are **not directly comparable**.
 
@@ -210,9 +210,9 @@ for the full report):
 4. Single-request batch reads — 15 tags in one packet
 5. CPU pinning + real-time priority
 
-**Result:** On the **reference machine** (pre-v3.1.3, 60 Hz, batch
+**Result:** On the **reference machine** (pre-v3.1.4, 60 Hz, batch
 enabled), **100% of full-loop samples stayed under 20 ms** — well within
-the control cycle for medium-speed industrial applications. The v3.1.3
+the control cycle for medium-speed industrial applications. The v3.1.4
 numbers on Docker/VM (see below) are a **different environment** and are
 **not directly comparable**.
 
@@ -303,11 +303,11 @@ Measured on a **different environment** than the reference machine:
 from **6.78% → 63.37%**. The remaining gap to the reference machine is
 mostly environmental (VM), not algorithmic.
 
-> **v3.1.3 update:** batch PLC I/O plus `poll_hz: 120` reduce median
+> **v3.1.4 update:** batch PLC I/O plus `poll_hz: 120` reduce median
 > `cmd_to_feedback` from 34.60 to **18.55 ms** and median `total_loop`
 > from 45.95 to **25.72 ms** on this same VM (−46% / −44%). See
 > [`vendor-neutral/README.md`](vendor-neutral/README.md) for the full
-> v3.1.3 comparison table. The reference machine was **not re-measured**.
+> v3.1.4 comparison table. The reference machine was **not re-measured**.
 
 ---
 
@@ -351,7 +351,7 @@ not by rewriting the core platform.
 │   │   ├── latency_comparison.md
 │   │   └── latency_full_loop_OPC-UA.md
 │   ├── linux/
-│   ├── ros2/                    # v3.1.3: analyze_probe.py, test_probe_chain.py
+│   ├── ros2/                    # v3.1.4: analyze_probe.py, test_probe_chain.py
 │   ├── windows/
 │   ├── isaac/
 │   ├── config/
@@ -414,7 +414,7 @@ If you use this software in academic work, please cite:
   month        = oct,
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {3.1.3},
+  version      = {3.1.4},
   doi          = {10.5281/zenodo.23312011},
   url          = {https://doi.org/10.5281/zenodo.23312011}
 }
@@ -422,7 +422,7 @@ If you use this software in academic work, please cite:
 
 Or in plain text:
 
-> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.4) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
 
 ---
 
