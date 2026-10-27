@@ -15,6 +15,100 @@ _Nothing yet._
 
 ---
 
+## [3.1.3] — 2026-10-26 — PLC Batch Mode + 120 Hz Tuning
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
+
+### Added
+
+- **`windows/plc_server_win.py` — batch PLC I/O enabled by default.**
+  Uses `SDataValueByName` + `ReadSignals`/`WriteSignals` to read/write
+  all tags in a single PLCSIM API call instead of one call per tag.
+  Controlled by the environment variable `PLC_BATCH`:
+  - `PLC_BATCH=1` (default) — batch mode
+  - `PLC_BATCH=0` — per-tag mode (legacy)
+  A startup self-test compares batch results with per-tag reads and
+  falls back automatically if they disagree.
+
+  **Fixed:** `EPrimitiveDataType` members are .NET primitive names
+  (`Double`, `Int32`, `Int16`, `Bool`), **not** Siemens names (`LReal`,
+  `DInt`, `Int`). The previous `_TYPE_NAMES` mapping failed its
+  self-test and silently fell back to per-tag calls. Batch mode was
+  never actually enabled until this fix. `_TYPE_NAMES` now maps:
+  `LReal→Double`, `DInt→Int32`, `Int→Int16`, `Bool→Bool`.
+
+- **`PLC_INSTANCE` environment variable** — overrides the default
+  instance name (`"296"`) without editing the file.
+
+- **`ros2/analyze_probe.py`** — offline CSV analysis tool. Reads
+  `latency_probe.csv` and produces p50/p95/p99, LBP table, and a
+  worst-5-rows table. Stages: `queue_delay`, `read_net`, `convert_pub`,
+  `ros_ruckig`, `isaac_step`, `ros_back`, `write_net`, plus
+  `cmd_to_feedback` and `total_loop` totals.
+
+- **`ros2/test_probe_chain.py`** — 10 standalone tests for the
+  latency-probe tag chain. Runs with `python3 ros2/test_probe_chain.py`
+  (no ROS or Isaac Sim required).
+
+- **`windows/Run.txt`** — quick-start usage notes for the Windows
+  server (defaults, `PLC_BATCH`, `PLC_INSTANCE`, `PLC_TIMING`).
+
+### Changed
+
+- **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
+  With batch I/O the bridge finishes a tick in ~3 ms; the previous
+  60 Hz cap left the CPU idle for ~13 ms per tick. At 120 Hz,
+  `queue_delay` drops from 13.48 ms to 5.87 ms.
+
+- **`PLC_TIMING` default is now `"1"`** in `windows/plc_server_win.py`
+  — timing report every 10 s without setting the env var.
+
+### Performance (Docker/VM — **not** the reference machine)
+
+Same code, same YAML except `poll_hz`. Reference machine was **not
+re-measured** for v3.1.3; the reference numbers (5.2 ms mean,
+16.3 ms max) still refer to v3.1.2 and earlier.
+
+| Metric (p50)      | batch OFF, 60 Hz | batch ON, 60 Hz | batch ON, 120 Hz |
+| :---------------- | ---------------: | --------------: | ---------------: |
+| `read_net`        | 6.04 ms          | 1.67 ms         | 1.36 ms          |
+| `write_net`       | 13.93 ms         | 12.79 ms        | 5.28 ms          |
+| `queue_delay`     | 6.33 ms          | 13.48 ms        | 5.87 ms          |
+| `cmd_to_feedback` | 34.60 ms         | 34.34 ms        | **18.55 ms**     |
+| `total_loop`      | 45.95 ms         | 49.69 ms        | **25.72 ms**     |
+
+| LBP (batch ON, 120 Hz) | share |
+| :--------------------- | ----: |
+| ≤ 30 ms                | 96.33% |
+| ≤ 40 ms                | 99.85% |
+| ≤ 50 ms                | 100.00% |
+
+### Fixed
+
+- **`windows/plc_server_win.py` batch self-test** — `_TYPE_NAMES`
+  now correctly maps Siemens type names to `EPrimitiveDataType`
+  members. Batch mode is actually enabled.
+
+### Known Limitations (added)
+
+| ID | Limitation |
+| :--- | :--- |
+| VL-17 | `isaac_step` (~9.71 ms p50) is now the largest single contributor on the Docker/VM. Reducing it requires GPU passthrough or headless mode. |
+| VL-18 | `poll_hz: 120` requires batch mode in the PLC server. With `PLC_BATCH=0`, revert to `poll_hz: 60`. |
+| VL-19 | The reference machine (native Ubuntu 24.04, dedicated cores) has **not** been re-measured with v3.1.3. The reference numbers (5.2 ms mean, 16.3 ms max) still refer to v3.1.2 and earlier. |
+
+### Migration Notes
+
+- No config schema change (still v2.1).
+- No ROS graph change.
+- If you use `windows/plc_server_win.py` from v3.1.2, replace it with
+  the v3.1.3 version. The bridge still works with the old server
+  (per-tag), just with higher `write_net`.
+- To disable batch: `PLC_BATCH=0` in the environment before starting
+  `plc_server_win.py`.
+
+---
+
 ## [3.1.2] — 2026-10-25 — Performance Fixes for VM Environments
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
@@ -222,7 +316,7 @@ compatible with BEST_EFFORT subscribers).
 
 ## [2.0.0] — 2026-10-07 — Yaskawa Modular
 
-**Location:** [`archive/yaskawa/`](archive/yaskawa/) — Gen 2
+**Location:** [`yaskawa/`](yaskawa/) — Gen 2
 
 ### Changed (Breaking)
 
@@ -246,7 +340,7 @@ compatible with BEST_EFFORT subscribers).
 
 ## [1.0.0] — 2026-09-15 — KUKA KR210 Full Digital Twin
 
-**Location:** [`archive/kuka/`](archive/kuka/) — Gen 1
+**Location:** [`kuka/`](kuka/) — Gen 1
 
 ### Added
 
@@ -307,6 +401,7 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | **v3.1.0** | **Any robot** | **Any transport** | **Vendor-neutral + Pydantic v2 + 26 tests** | **`vendor-neutral/`** |
 | **v3.1.1** | **Any robot** | **Any transport** | **+ `trajectory_twin.py`, environment transparency, 29 tests** | **`vendor-neutral/`** |
 | **v3.1.2** | **Any robot** | **Any transport** | **+ threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes** | **`vendor-neutral/`** |
+| **v3.1.3** | **Any robot** | **Any transport** | **+ batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests** | **`vendor-neutral/`** |
 
 ---
 
@@ -324,8 +419,8 @@ This project uses [Semantic Versioning](https://semver.org/):
 
 - **Repository:** https://github.com/Nebras4u/isaac-plc-digital-twin
 - **Gen 3 (active):** [`vendor-neutral/`](vendor-neutral/)
-- **Gen 2 (reference):** [`archive/yaskawa/`](archive/yaskawa/)
-- **Gen 1 (reference):** [`archive/kuka/`](archive/kuka/)
+- **Gen 2 (reference):** [`yaskawa/`](yaskawa/)
+- **Gen 1 (reference):** [`kuka/`](kuka/)
 
 ***
 
