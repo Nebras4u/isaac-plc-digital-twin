@@ -1,16 +1,18 @@
 # Isaac Digital Twin — Vendor-Neutral Platform
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PLC](https://img.shields.io/badge/PLC-Vendor--Neutral-lightgrey)](#supported-combinations)
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble%20%7C%20Jazzy-blue)](https://docs.ros.org/)
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-yellow)](https://www.python.org)
 [![Pydantic](https://img.shields.io/badge/Pydantic-2.x-blueviolet)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-29%20passed-success)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-29%20pytest%20%2B%2010%20standalone-success)](#testing)
 [![Schema](https://img.shields.io/badge/Config%20Schema-v2.1-success)](#configuration)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
-[![Reference latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#results)
-[![Reference max](https://img.shields.io/badge/Reference%20max%20latency-25.7%20ms%20(batch)-success)](#results)
+[![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#control-loop-latency-reference)
+[![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#control-loop-latency-reference)
+[![VM post-v3.1.3](https://img.shields.io/badge/VM%20post--v3.1.3%20p50-18.55%20ms-blueviolet)](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -60,7 +62,8 @@ platform.
   - [Control-Loop Latency (reference)](#control-loop-latency-reference)
   - [Bridge Real-Time Behaviour](#bridge-real-time-behaviour)
   - [Clock Drift Calibration](#clock-drift-calibration)
-  - [Results (this machine)](#results-this-machine)
+  - [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
+  - [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
 - [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
 - [Lineage](#lineage)
@@ -88,19 +91,31 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | Isaac Sim      | Native, 60 FPS stable               |
 | ROS 2          | Jazzy                               |
 | RMW            | FastDDS                             |
-| `tcp_json`     | msgpack + `TCP_NODELAY` + batch (v3.1.3) |
+| `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
+
+> **Note on v3.1.3:** The reference numbers above were measured on the
+> reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
+> mode on the Windows server (`_TYPE_NAMES` mapping) and raised
+> `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
+> **not** on the reference machine. The reference machine has **not
+> been re-measured** for v3.1.3. See
+> [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> for VM results, which use a different metric (`total_loop` p50) and
+> are not comparable to the mean/max shown above.
 
 The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
-[Results (this machine)](#results-this-machine). This is expected and
-does not indicate a regression.
+[Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
+and
+[v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
+This is expected and does not indicate a regression.
 
 **How to measure on your machine:**
 
 1. Set `latency_probe: true` in `config/plc_ros_bridge.yaml`.
 2. Run the bridge for ≥ 30 s.
 3. Analyze `latency_probe.csv` with `tools/latency_full_loop.py`, or use
-   the inline snippet in [Results (this machine)](#results-this-machine).
+   the inline snippet in [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312).
 
 ---
 
@@ -129,8 +144,9 @@ these concerns to the modules above.
 
 **Since Gen 3.1**, configuration validation is **declarative**
 (Pydantic v2 schema in `bridge_config.py`), with **versioning**,
-**audit trail**, and **29 unit tests** covering the main structural
-rules (see [Testing](#testing) for what is and is not covered).
+**audit trail**, and **29 pytest tests** covering the main structural
+rules plus **10 standalone probe tests** (see [Testing](#testing) for
+what is and is not covered).
 A bad config fails **before** the bridge touches the PLC.
 
 ---
@@ -200,7 +216,7 @@ the same `SingleThreadedExecutor`. That serialized the two callbacks and
 avoided the GIL races that had caused 200–1000 ms `read` stalls on VMs,
 but a slow PLC read (6–7 ms) delayed `/joint_states` delivery and
 inflated `ros_back` to ~4.7 ms. Moving the I/O out of the executor
-reduced `ros_back` by 92% (see [Results (this machine)](#results-this-machine)).
+reduced `ros_back` by 92% (see [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)).
 
 **What to watch:** the two threads now share the GIL again, so keep an
 eye on `avg_slow_gap_ms` in the `tick_stats` line (see
@@ -224,7 +240,8 @@ arrived since the last frame is applied in the same frame.
     +-- pytest.ini                        # Test configuration
     |
     +-- windows/
-    |   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON
+    |   +-- plc_server_win.py             # PLCSIM Advanced -> TCP/JSON (batch I/O)
+    |   +-- Run.txt                       # Quick-start usage notes
     |
     +-- linux/
     |   +-- trajectory_twin.py            # Ruckig trajectory + state machine
@@ -233,6 +250,10 @@ arrived since the last frame is applied in the same frame.
     |   +-- plc_drivers.py                # 3 transports (tcp_json/opcua/plc_api)
     |   +-- plc_config.py                 # signal mapping + extractor
     |   +-- bridge_logger.py              # Structured logging
+    |
+    +-- ros2/
+    |   +-- analyze_probe.py              # Offline CSV analysis (v3.1.3)
+    |   +-- test_probe_chain.py           # 10 standalone probe tests (v3.1.3)
     |
     +-- tests/
     |   +-- conftest.py
@@ -269,6 +290,10 @@ arrived since the last frame is applied in the same frame.
         +-- latency_comparison.md         # Full comparison report
         +-- latency_full_loop_OPC-UA.md   # Baseline report
         +-- upgrade_report.html           # Session report: Prototype -> Production Grade
+
+> **Note:** The `ros2/` folder was added in v3.1.3 to hold the offline
+> analysis tool (`analyze_probe.py`) and the standalone probe tests
+> (`test_probe_chain.py`). The existing files in `linux/` are unchanged.
 
 ---
 
@@ -432,7 +457,7 @@ v2. Benefits over the previous hand-written validator:
 | Versioning             | None                                    | `schema_version` + migration chain               |
 | Audit trail            | None                                    | `sha256` hash + timestamp in JSONL               |
 | E-stop forwarding      | None                                    | Enforced at config load (opt-out for tests)      |
-| Unit tests             | 0                                       | **29**                                           |
+| Unit tests             | 0                                       | **29** (plus 10 standalone probe tests)          |
 
 **Backward compatibility:** configs without `schema_version` are treated
 as v1.0 and migrated to v2.1 in-memory. No manual edits required.
@@ -597,6 +622,17 @@ the published `JointState` messages still use radians, per ROS convention.
 - `avg_slow_gap_ms > 0` indicates GIL contention (bridge-side).
 - `avg_slow_sock_ms > 0` indicates real server-side stalls (not bridge-side).
 
+**Probe stats (since v3.1.3):** if `latency_probe: true`, the same
+`tick_stats` line also carries:
+
+    probe_sent=1800 probe_rows=649 probe_rejected=0 probe_order_violations=0
+
+- `probe_sent` — number of probe tags emitted this run
+- `probe_rows` — number of CSV rows successfully written
+- `probe_rejected` — malformed tags (should stay 0)
+- `probe_order_violations` — timestamps not monotonic along the chain
+  (should stay 0)
+
 ---
 
 ## Testing
@@ -615,9 +651,31 @@ To list the collected tests without running them:
 
     python3 -m pytest tests/ --collect-only -q
 
+### Standalone probe tests (not pytest)
+
+`ros2/test_probe_chain.py` contains **10 additional tests** for the
+latency-probe tag chain. They run without ROS or Isaac Sim:
+
+    cd ros2
+    python3 test_probe_chain.py
+    # Expected: 10/10 passed
+
+These tests cover:
+
+- Tag validation (7 parts required, `"p"` marker)
+- Deduplication on `origin_ns`
+- Order-violation counting (write_done < js_recv)
+- Untagged `joint_states` does not erase the pending tag
+- `trajectory_twin` single-timestamp-per-hop behaviour
+- `physics_twin` stale-tag rejection (no `js_pub` when setpoint is old)
+- `analyze_probe.py` on synthetic CSV
+
+The `pytest` suite (29 tests) covers config schema and Ruckig
+parameters. The 10 standalone tests cover the probe chain.
+
 ### What is tested
 
-The 29 unit tests cover the **main structural rules** enforced by the
+The 29 pytest tests cover the **main structural rules** enforced by the
 schema and the Ruckig planner parameters. Each test maps to a specific
 industrial risk.
 
@@ -662,7 +720,7 @@ All seven are cases of `test_ruckig_rejects_bad_params`; each must raise
 ### Not yet covered
 
 These rules are implemented (see [Configuration](#configuration)) but
-have **no test in the two files above**:
+have **no test in the two pytest files**:
 
 - `robot.yaml` validation: `limits_deg` (`lower < upper`, range ≤ 720°)
   and the `controlled_joints` ↔ `limits_deg` cross-check.
@@ -727,8 +785,13 @@ tracking result.*
 
 ### Control-Loop Latency (reference)
 
-> **Reference machine only.** See [Environment](#environment) and
-> [Results (this machine)](#results-this-machine) for the VM numbers.
+> **Reference machine only.** All numbers in this section are from the
+> **native Ubuntu 24.04** reference machine described in
+> [Environment](#environment). They predate v3.1.3. See
+> [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
+> and [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> for VM numbers, which use different metrics and are **not directly
+> comparable**.
 
 Measured with `tools/latency_full_loop.py` (L2 + L3, after TCP-JSON
 optimization).
@@ -744,6 +807,10 @@ optimization).
 | **Full loop (L1+L2+L3+L4)** | **~15–25 ms**| **~40 ms** | **~55 ms** | **~80 ms** |
 
 #### Comparison across transports
+
+> All rows in this table are from the **reference machine**, **pre-v3.1.3**.
+> They use mean/max, not p50/p95. Do not compare directly with the
+> VM tables below.
 
 | Transport              | Mean       | Max        | Notes                           |
 | :--------------------- | :--------: | :--------: | :------------------------------ |
@@ -761,9 +828,11 @@ optimization).
 | <= 20 ms  | 100%     |
 | <= 50 ms  | 100%     |
 
-**Result:** 100% of full-loop samples stay under 20 ms on the
-**reference machine**. This is well within the control cycle for
-medium-speed industrial applications.
+**Result:** On the **reference machine** (pre-v3.1.3, native Ubuntu,
+60 Hz, batch mode enabled), **100% of full-loop samples stayed under
+20 ms**. This remains the canonical reference number. The v3.1.3
+numbers on Docker/VM (see below) are a **different environment** and
+are **not directly comparable**.
 
 See `docs/latency_comparison.md` for the full report.
 
@@ -947,72 +1016,15 @@ machine's hardware.
 6. For QEMU/KVM: enable `hypervclock`, disable `hpet`, pin vCPUs, then
    re-run.
 
-### v3.1.3 — PLC batch mode + 120 Hz tuning (this machine)
+### Results (this machine — detailed, v3.1.2)
 
-> **Summary:** Two changes reduced median `cmd_to_feedback` from
-> **34.60 ms → 18.55 ms** (−46%) and median `total_loop` from
-> **45.95 ms → 25.72 ms** (−44%) on the same Docker/VM environment.
-> No changes to the ROS graph or the Isaac Sim scene.
+> **Environment:** Docker/VM (Ubuntu 24.04, RTX 5060, shared vCPU,
+> PLCSIM Advanced V6.0, FastDDS). **Not** the reference machine.
+> These are the **v3.1.2** numbers that serve as the baseline for
+> v3.1.3. For the v3.1.3 comparison (batch ON, 120 Hz), see
+> [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
 
-**What changed**
-
-1. **`windows/plc_server_win3.py` → `plc_server_win5.py` (batch mode).**
-   The old server issued one PLCSIM API call per tag (`ReadDouble`,
-   `WriteBool`, …). The new server uses `SDataValueByName` +
-   `ReadSignals`/`WriteSignals` to read/write all tags in a single
-   API call. Batch is enabled by default; the environment variable
-   `PLC_BATCH=0` disables it. The self-test verifies that the batch
-   result matches per-tag reads before enabling.
-
-   > **Critical fix:** `EPrimitiveDataType` members are .NET primitive
-   > names (`Double`, `Int32`, `Int16`, `Bool`), **not** Siemens names
-   > (`LReal`, `DInt`, `Int`). The previous server failed its self-test
-   > because it looked for `LReal`/`DInt`/`Int` and fell back to
-   > per-tag calls. The corrected `_TYPE_NAMES` maps `LReal→Double`,
-   > `DInt→Int32`, `Int→Int16`.
-
-2. **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
-   With batch mode, the bridge completes a tick much faster than
-   before (~3 ms of PLC I/O instead of ~15 ms). The previous 60 Hz
-   cap left the CPU idle ~13 ms per tick (`queue_delay ≈ 13 ms`).
-   At 120 Hz, the same work is spread across twice as many ticks;
-   `queue_delay` drops from 13.48 ms to 5.87 ms.
-
-**Impact (same environment, same code, same YAML except `poll_hz`)**
-
-| Metric (p50)      | batch OFF, 60 Hz | batch ON, 60 Hz | **batch ON, 120 Hz** |
-| :---------------- | ---------------: | --------------: | -------------------: |
-| `read_net`        | 6.04 ms          | 1.67 ms         | **1.36 ms**          |
-| `write_net`       | 13.93 ms         | 12.79 ms        | **5.28 ms**          |
-| `queue_delay`     | 6.33 ms          | 13.48 ms        | **5.87 ms**          |
-| `cmd_to_feedback` | 34.60 ms         | 34.34 ms        | **18.55 ms**         |
-| `total_loop`      | 45.95 ms         | 49.69 ms        | **25.72 ms**         |
-
-**Latency Bound Probability (batch ON, 120 Hz, n=1308):**
-
-| Threshold | LBP     |
-| :-------- | ------: |
-| ≤ 20 ms   | 59.17%  |
-| ≤ 30 ms   | 96.33%  |
-| ≤ 40 ms   | 99.85%  |
-| ≤ 50 ms   | 100.00% |
-
-**Remaining bottlenecks (batch ON, 120 Hz, p50):**
-
-| Stage         | p50      | Share |
-| :------------ | -------: | ----: |
-| `isaac_step`  | 9.71 ms  | 38%   |
-| `queue_delay` | 5.87 ms  | 23%   |
-| `write_net`   | 5.28 ms  | 21%   |
-| `ros_ruckig`  | 4.32 ms  | 17%   |
-
-The next optimization targets are Isaac Sim physics step (headless
-mode or GPU passthrough) and the network link to the PLC.
-
-### Results (this machine — after batch + 120 Hz, v3.1.3)
-
-Measured on a **different environment** than the reference machine,
-after the v3.1.2 fixes described below:
+Measured after the v3.1.2 fixes described below.
 
 | Item         | Value                                  |
 | :----------- | :------------------------------------- |
@@ -1088,7 +1100,86 @@ after the v3.1.2 fixes described below:
 - `ros_ruckig` went **up** (6.57 → 8.14 ms) between v3.1.1 and v3.1.2, although the executor change was meant to reduce its overhead. The earlier "(DDS)" attribution was not verified. Treat this as an open item (`VL-16`) and re-measure with identical executor and QoS settings before drawing conclusions.
 - The single outlier (`max = 103575 ms`) is a **103-second stall** in Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded from the filtered statistics; its root cause is still open (`VL-14`).
 
-**Conclusion:** the fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is mostly environmental (VM), not algorithmic.
+**Conclusion:** the v3.1.2 fixes reduced median full-loop latency by **30%** (67.36 → 47.20 ms) and increased the fraction of samples under 50 ms from **6.78% → 63.37%**. The remaining gap to the reference machine is mostly environmental (VM), not algorithmic.
+
+### v3.1.3 — PLC batch mode + 120 Hz tuning (this machine)
+
+> **⚠️ These numbers are from the Docker/VM environment**
+> (Ubuntu 24.04, RTX 5060, shared vCPU, PLCSIM Advanced V6.0).
+> **They are NOT from the reference machine** and are **not directly
+> comparable** to the reference numbers shown above (5.2 ms mean,
+> 16.3 ms max on native Ubuntu).
+>
+> The comparison is valid **within this VM environment**: same code,
+> same YAML except `poll_hz`, measured before and after v3.1.3.
+> The reference machine was **not re-measured** for v3.1.3.
+
+> **Summary:** On this VM, two changes reduced median `cmd_to_feedback`
+> from **34.60 ms → 18.55 ms** (−46%) and median `total_loop` from
+> **45.95 ms → 25.72 ms** (−44%). No changes to the ROS graph or the
+> Isaac Sim scene.
+
+**What changed**
+
+1. **`windows/plc_server_win.py` — batch mode enabled by default.**
+   The previous server issued one PLCSIM API call per tag (`ReadDouble`,
+   `WriteBool`, …). The updated server uses `SDataValueByName` +
+   `ReadSignals`/`WriteSignals` to read/write all tags in a single
+   API call. Batch is enabled by default; the environment variable
+   `PLC_BATCH=0` disables it. The self-test verifies that the batch
+   result matches per-tag reads before enabling.
+   `PLC_INSTANCE` overrides the default instance name (default `"296"`);
+   `PLC_TIMING` defaults to `"1"` (report every 10 s).
+
+   > **Critical fix:** `EPrimitiveDataType` members are .NET primitive
+   > names (`Double`, `Int32`, `Int16`, `Bool`), **not** Siemens names
+   > (`LReal`, `DInt`, `Int`). The previous server failed its self-test
+   > because it looked for `LReal`/`DInt`/`Int` and fell back to
+   > per-tag calls. The corrected `_TYPE_NAMES` maps `LReal→Double`,
+   > `DInt→Int32`, `Int→Int16`.
+
+2. **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
+   With batch mode, the bridge completes a tick much faster than
+   before (~3 ms of PLC I/O instead of ~15 ms). The previous 60 Hz
+   cap left the CPU idle ~13 ms per tick (`queue_delay ≈ 13 ms`).
+   At 120 Hz, the same work is spread across twice as many ticks;
+   `queue_delay` drops from 13.48 ms to 5.87 ms.
+
+3. **`ros2/analyze_probe.py` and `ros2/test_probe_chain.py` (new).**
+   The CSV analyser is now in its own file with a clean p50/p95/p99
+   report, LBP table, and a worst-5-rows table. The 10 standalone probe
+   tests do not require ROS or Isaac Sim.
+
+**Impact (same environment, same code, same YAML except `poll_hz`)**
+
+| Metric (p50)      | batch OFF, 60 Hz | batch ON, 60 Hz | **batch ON, 120 Hz** |
+| :---------------- | ---------------: | --------------: | -------------------: |
+| `read_net`        | 6.04 ms          | 1.67 ms         | **1.36 ms**          |
+| `write_net`       | 13.93 ms         | 12.79 ms        | **5.28 ms**          |
+| `queue_delay`     | 6.33 ms          | 13.48 ms        | **5.87 ms**          |
+| `cmd_to_feedback` | 34.60 ms         | 34.34 ms        | **18.55 ms**         |
+| `total_loop`      | 45.95 ms         | 49.69 ms        | **25.72 ms**         |
+
+**Latency Bound Probability (batch ON, 120 Hz, n=1308):**
+
+| Threshold | LBP     |
+| :-------- | ------: |
+| ≤ 20 ms   | 59.17%  |
+| ≤ 30 ms   | 96.33%  |
+| ≤ 40 ms   | 99.85%  |
+| ≤ 50 ms   | 100.00% |
+
+**Remaining bottlenecks (batch ON, 120 Hz, p50):**
+
+| Stage         | p50      | Share |
+| :------------ | -------: | ----: |
+| `isaac_step`  | 9.71 ms  | 38%   |
+| `queue_delay` | 5.87 ms  | 23%   |
+| `write_net`   | 5.28 ms  | 21%   |
+| `ros_ruckig`  | 4.32 ms  | 17%   |
+
+The next optimization targets are Isaac Sim physics step (headless
+mode or GPU passthrough, `VL-19`) and the network link to the PLC.
 
 ---
 
@@ -1120,6 +1211,7 @@ external knob at 60 Hz:
 | Dedicated PLC I/O thread (v3.1.2)| A slow PLC read no longer delays `/joint_states` delivery (`ros_back` −92%)               |
 | `SingleThreadedExecutor`         | ROS callbacks run strictly in sequence; no executor overhead in `trajectory_twin.py`      |
 | `BEST_EFFORT` + `depth=1` QoS    | Old samples are dropped instead of queued on high-rate streams                            |
+| Batch PLC I/O (v3.1.3)           | One PLCSIM API call per request instead of per-tag                                        |
 | State-topic publish dedupe       | Cuts DDS traffic from ~300 msg/s to <10 msg/s at steady state                             |
 | `TCP_NODELAY` on tcp_json socket | Prevents Nagle/delayed-ACK stalls (defensive)                                             |
 | Monotonic timing                 | Removes NTP/hypervisor clock-jump artifacts from `slow_read` diagnostics                  |
@@ -1140,6 +1232,7 @@ external knob at 60 Hz:
 | `write_net` ~12 ms                   | Use the `plc_api` driver (PLCSIM direct) if the bridge runs on Windows    | VL-12  |
 | `isaac_step` ~10 ms                  | Enable GPU passthrough or run Isaac Sim on a native host                  | VL-13  |
 | One-off multi-second stall in Isaac  | Avoid Play/Pause and re-init during measurement runs                      | VL-14  |
+| `poll_hz: 120` with `PLC_BATCH=0`    | Revert to `poll_hz: 60`                                                   | VL-18  |
 
 ### Transport Tuning
 
@@ -1156,7 +1249,11 @@ external knob at 60 Hz:
 - Consider OPC UA Subscriptions for change-based updates
 - Set `TCP_NODELAY` on the OPC UA client socket
 
-### Expected Performance
+### Expected Performance (reference machine, pre-v3.1.3)
+
+> These rows are from the **reference machine**, **pre-v3.1.3**.
+> They use mean/max, not p50/p95. Do not compare directly with the
+> VM tables above.
 
 | Transport             | Mean      | p99        | Max        |
 | :-------------------- | :-------: | :--------: | :--------: |
@@ -1171,12 +1268,17 @@ external knob at 60 Hz:
 
 | Document                            | Description                                   |
 | :---------------------------------- | :-------------------------------------------- |
-| `docs/README_full.md`               | Gen 3 full documentation                      |
+| `README.md` (this file)             | Full documentation (all sections)             |
+| `CHANGELOG.md`                      | Version history (all generations)             |
 | `docs/migration.md`                 | How this folder was split from v2.0.0         |
 | `docs/latency_comparison.md`        | Full latency comparison report                |
 | `docs/latency_full_loop_OPC-UA.md`  | OPC UA baseline report                        |
 | `docs/upgrade_report.html`          | Session report: Prototype -> Production Grade |
-| `../CHANGELOG.md`                   | Version history (all generations)             |
+
+> **Note:** An earlier version of this table referenced
+> `docs/README_full.md`, which does not exist in this repository. The
+> README you are reading **is** the full documentation. Historical
+> versions of the same content live in `archive/`.
 
 ---
 
@@ -1191,6 +1293,7 @@ external knob at 60 Hz:
 | v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests            | `vendor-neutral/`       |
 | v3.1.1  | Any robot     | Any transport     | + `trajectory_twin.py`, environment transparency, 29 tests | `vendor-neutral/` |
 | v3.1.2  | Any robot     | Any transport     | + threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes | `vendor-neutral/`    |
+| v3.1.3  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests | `vendor-neutral/` |
 
 ---
 
@@ -1242,32 +1345,32 @@ but they must be understood before deploying to a physical robot.
   should be fixed before production.
 - **One 6 s link drop was observed on the VM environment**, producing a
   single 9514 ms outlier in `latency_probe.csv`. Excluded from the
-  filtered statistics in [Results (this machine)](#results-this-machine).
+  filtered statistics in
+  [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312).
 
-<<<<<<< HEAD
 ### Performance on VM
 
-- **`write_net` ~12 ms** (PLCSIM Advanced API on a Windows guest).
-  Reduce by switching to the `plc_api` driver if the bridge runs on
-  Windows (`VL-12`).
-- **`isaac_step` ~10 ms** (shared vCPU). Reduce with GPU passthrough or
-  a native host (`VL-13`).
-- **`ros_ruckig` median rose from 6.57 ms (v3.1.1) to 8.14 ms
-  (v3.1.2).** Cause not verified; re-measure before drawing conclusions
-  (`VL-16`).
+- **VL-12** — `write_net` ~12 ms on the VM (PLCSIM Advanced API on a
+  Windows guest). Reduce by switching to the `plc_api` driver if the
+  bridge runs on Windows.
+- **VL-13** — `isaac_step` ~10 ms on the VM (shared vCPU). Reduce with
+  GPU passthrough or a native host.
+- **VL-16** — `ros_ruckig` median rose from 6.57 ms (v3.1.1) to 8.14 ms
+  (v3.1.2). Cause not verified; re-measure before drawing conclusions.
+- **VL-18** — `poll_hz: 120` (v3.1.3) requires batch mode in the PLC
+  server. With `PLC_BATCH=0`, revert to `poll_hz: 60`.
+- **VL-19** — Isaac Sim physics step (`isaac_step`, ~10 ms p50) is now
+  the largest single contributor on the VM. Reducing it requires GPU
+  passthrough or headless mode.
 
 ### Verification status
 
-- **`VL-06`** — the v3.1.1 fixes (brake not cancelled by a persistent bad
+- **VL-06** — the v3.1.1 fixes (brake not cancelled by a persistent bad
   command; e-stop not auto-cleared on reconnect) were verified with
   stubbed ROS 2 / Ruckig only. They have not yet been re-tested on Isaac
   Sim or PLCSIM Advanced.
-- **`VL-07`** — no automated tests yet for the planner state-machine
+- **VL-07** — no automated tests yet for the planner state-machine
   transitions.
-### Known Limitations (added in v3.1.3)
-
-- **VL-18** — `poll_hz: 120` requires batch mode in the PLC server. With `PLC_BATCH=0`, revert to `poll_hz: 60`.
-- **VL-19** — Isaac Sim physics step (`isaac_step`, ~10 ms p50) is now the largest single contributor. Reducing it requires GPU passthrough or headless mode.
 
 ### Not Certified
 
@@ -1314,7 +1417,7 @@ This project is **not a certified safety function**. See the
 - [x] **v3.1.3** — PLC batch mode + `poll_hz: 120`
   - Median `cmd_to_feedback`: 34.60 → **18.55 ms** (−46%)
   - Median `total_loop`: 45.95 → **25.72 ms** (−44%)
-  - LBP ≤ 50 ms: 96.90% → **100.00%**
+  - LBP ≤ 50 ms: 96.90% → **100.00%** (this VM)
 
 ### Gen 3.1 — Production-Grade Config (completed)
 
@@ -1328,9 +1431,11 @@ This project is **not a certified safety function**. See the
 - [x] **Audit trail** — `sha256` hash + ISO-8601 timestamp logged to JSONL
 - [x] **Fail-fast** — bad config rejected **before** any socket is opened
 - [x] **`robot.yaml` validation** — `_validate_limits`, Ruckig parameter sanity
-- [x] **29 unit tests** (`pytest tests/ -v` → 29 passed in 0.17 s)
+- [x] **29 pytest tests** (`pytest tests/ -v` → 29 passed in 0.17 s)
   - 22 for config schema (`test_bridge_config.py`)
   - 7 for trajectory planner (`test_trajectory_twin.py`)
+- [x] **10 standalone probe tests** (`python3 ros2/test_probe_chain.py`
+      → 10/10 passed)
 - [x] **`requirements-dev.txt` + `pytest.ini`** — repeatable test setup
 - [x] **PEP 668 aware** — documented venv workflow for Python 3.11+
 - [x] **E-stop forwarding enforced** — config rejected if the PLC E-stop
@@ -1346,6 +1451,8 @@ This project is **not a certified safety function**. See the
       `physics_twin.py` (`isaac_step` −62%)
 - [x] **v3.1.2** — `BEST_EFFORT` + `depth=1` QoS on high-rate streams
 - [x] **v3.1.2** — `SingleThreadedExecutor` in `trajectory_twin.py`
+- [x] **v3.1.3** — batch PLC I/O (fixed `_TYPE_NAMES`); `poll_hz` 120;
+      `analyze_probe.py` + `test_probe_chain.py`
 
 ### In Progress
 
@@ -1360,6 +1467,8 @@ This project is **not a certified safety function**. See the
 - [ ] Investigate the 103 s Isaac Sim stall (`VL-14`)
 - [ ] Improve VM performance — `write_net` (~12 ms, `VL-12`) and
       `isaac_step` (~10 ms, `VL-13`) on the Docker environment
+- [ ] Re-measure the **reference machine** with v3.1.3 (batch + 120 Hz)
+      to provide updated canonical numbers
 - [ ] Optional: CycloneDDS support on Isaac Sim (requires internal
       Python 3.11 libraries and `LD_LIBRARY_PATH` — see Known Limitations)
 
