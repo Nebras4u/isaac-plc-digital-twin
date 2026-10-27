@@ -60,6 +60,16 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | RMW            | FastDDS                             |
 | `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
 
+> **Note on v3.1.3:** The reference numbers above were measured on the
+> reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
+> mode on the Windows server (`_TYPE_NAMES` mapping) and raised
+> `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
+> **not** on the reference machine. The reference machine has **not
+> been re-measured** for v3.1.3. See
+> [`vendor-neutral/README.md`](vendor-neutral/README.md) for the VM
+> comparison, which uses a different metric (`total_loop` p50) and is
+> not directly comparable to the mean/max shown here.
+
 The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
 [Results (this machine)](#results-this-machine) below. This is expected
@@ -84,21 +94,29 @@ Python.**
 Highlights:
 
 - 3 transports in one abstraction: `tcp_json`, `opcua`, `plc_api`
+- **Batch PLC I/O** (`ReadSignals`/`WriteSignals` — one API call per
+  request instead of per-tag; v3.1.3)
 - Robot description in `config/robot.yaml`
 - Signal mapping in `config/plc_ros_bridge.yaml`
 - Ruckig-based online trajectory generation (`trajectory_twin.py`,
   configured from `config/robot.yaml`)
+- **Gravity is kept enabled** (real physics). Compensation is achieved
+  implicitly via high drive stiffness in `config/robot.yaml` — not by
+  disabling gravity or weightlessness.
 - Controlled braking on e-stop, heartbeat/feedback loss, or an
   out-of-limits command (never an abrupt setpoint jump)
 - Counter-based heartbeat protocol
-- Sub-0.03° tracking accuracy verified
+- Sub-0.03° tracking accuracy verified under full gravity load
 - **Full-loop latency: 5.2 ms mean, 16.3 ms max** (TCP-JSON optimized,
   reference machine — see [Environment](#environment))
 - **58% faster** than the naive TCP-JSON baseline on the same machine
   (mean 12.5 ms → 5.2 ms)
-- **29 unit tests** covering the config schema, migration, E-stop
+- **29 pytest tests** covering the config schema, migration, E-stop
   forwarding, and Ruckig parameter validation
+- **10 standalone probe tests** covering the latency-tag chain
+  (`ros2/test_probe_chain.py`)
 - **Config schema v2.1** (Pydantic v2, fail-fast, audit trail)
+- **Offline latency analysis** tool: `ros2/analyze_probe.py`
 
 **See [`vendor-neutral/README.md`](vendor-neutral/README.md) for full docs.**
 
@@ -107,19 +125,26 @@ Highlights:
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
-**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-27).
+**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-26).
 
 **v3.1.3 — PLC Batch Mode + 120 Hz Tuning:**
 
-- **`plc_ros_bridge.py` — batch mode for PLC I/O.** PLC reads/writes
-  are grouped per control cycle to reduce round-trips and jitter on
-  slow transports.
-- **120 Hz tuning.** Control-loop parameters re-tuned for 120 Hz
-  operation; re-measure latency on your own hardware before comparing
-  against the reference numbers.
-- *(Align the detailed bullets above with the `CHANGELOG.md` v3.1.3
-  entry — this README will reflect the full note once the CHANGELOG is
-  updated.)*
+- **`windows/plc_server_win.py` — batch PLC I/O enabled by default.**
+  Uses `SDataValueByName` + `ReadSignals`/`WriteSignals` to read/write
+  all tags in a single API call. `PLC_BATCH=0` reverts to per-tag mode.
+  **Fixed:** `_TYPE_NAMES` maps `LReal→Double`, `DInt→Int32`,
+  `Int→Int16` (EPrimitiveDataType uses .NET names, not Siemens names).
+  This was the root cause of the silent fallback to per-tag calls.
+- **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.** With batch,
+  a tick finishes in ~3 ms; the 60 Hz cap left the CPU idle ~13 ms per
+  tick. At 120 Hz, `queue_delay` drops from 13.48 ms to 5.87 ms.
+- **`ros2/analyze_probe.py` (new)** — offline CSV analysis with
+  p50/p95/p99, LBP table, worst-5-rows table.
+- **`ros2/test_probe_chain.py` (new)** — 10 standalone tests, no ROS
+  or Isaac Sim required.
+- **Impact (Docker/VM, not reference machine):** median
+  `cmd_to_feedback` 34.60 → **18.55 ms** (−46%); median `total_loop`
+  45.95 → **25.72 ms** (−44%); LBP ≤ 50 ms 96.90% → **100.00%**.
 
 **v3.1.2 — Performance Fixes for VM Environments** (2026-10-25):
 
@@ -161,12 +186,11 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
 
 ## Latency Performance
 
-> **Reference machine only.** See [Environment](#environment) and
-> [Results (this machine)](#results-this-machine) for the VM numbers.
-
-> **Note:** the latency tables in this section and the next one were
-> measured on **v3.1.2**. Re-measurement on v3.1.3 (batch mode + 120 Hz
-> tuning) is pending.
+> **Reference machine only.** All numbers in this section are from the
+> **native Ubuntu 24.04** reference machine described in
+> [Environment](#environment). They predate v3.1.3. See
+> [Results (this machine)](#results-this-machine) for VM numbers, which
+> use different metrics and are **not directly comparable**.
 
 Measured across all transports (see
 [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md)
@@ -186,9 +210,11 @@ for the full report):
 4. Single-request batch reads — 15 tags in one packet
 5. CPU pinning + real-time priority
 
-**Result:** 100% of full-loop samples stay under 20 ms on the
-**reference machine** — well within the control cycle for medium-speed
-industrial applications.
+**Result:** On the **reference machine** (pre-v3.1.3, 60 Hz, batch
+enabled), **100% of full-loop samples stayed under 20 ms** — well within
+the control cycle for medium-speed industrial applications. The v3.1.3
+numbers on Docker/VM (see below) are a **different environment** and are
+**not directly comparable**.
 
 ---
 
@@ -277,6 +303,12 @@ Measured on a **different environment** than the reference machine:
 from **6.78% → 63.37%**. The remaining gap to the reference machine is
 mostly environmental (VM), not algorithmic.
 
+> **v3.1.3 update:** batch PLC I/O plus `poll_hz: 120` reduce median
+> `cmd_to_feedback` from 34.60 to **18.55 ms** and median `total_loop`
+> from 45.95 to **25.72 ms** on this same VM (−46% / −44%). See
+> [`vendor-neutral/README.md`](vendor-neutral/README.md) for the full
+> v3.1.3 comparison table. The reference machine was **not re-measured**.
+
 ---
 
 ## Future Vision
@@ -319,6 +351,7 @@ not by rewriting the core platform.
 │   │   ├── latency_comparison.md
 │   │   └── latency_full_loop_OPC-UA.md
 │   ├── linux/
+│   ├── ros2/                    # v3.1.3: analyze_probe.py, test_probe_chain.py
 │   ├── windows/
 │   ├── isaac/
 │   ├── config/
@@ -326,6 +359,7 @@ not by rewriting the core platform.
 │   └── tools/
 ├── kuka/                    # Gen 1 — KUKA KR210 (TCP/JSON)
 ├── yaskawa/                 # Gen 2 — Yaskawa GP110 (OPC UA)
+├── docs/                        # Cross-generation documentation
 └── README.md                    # This file
 ```
 
@@ -357,21 +391,20 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
 ## Documentation
 
-| Document                                                                                 | Description                                |
-| :--------------------------------------------------------------------------------------- | :----------------------------------------- |
-| [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 3 (active) — vendor-neutral platform   |
-| [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports  |
-| [`archive/kuka/README.md`](kuka/README.md)                                               | Gen 1 — KUKA KR210                         |
-| [`archive/yaskawa/docs/README.md`](yaskawa/docs/README.md)                               | Gen 2 — Yaskawa GP110                      |
-| [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                            |
-| [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                    |
+| Document | Description |
+| :--- | :--- |
+| [`vendor-neutral/README.md`](vendor-neutral/README.md) | Gen 3 (active) — vendor-neutral platform |
+| [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports |
+| [`archive/kuka/README.md`](archive/kuka/README.md) | Gen 1 — KUKA KR210 |
+| [`archive/yaskawa/docs/README.md`](archive/yaskawa/docs/README.md) | Gen 2 — Yaskawa GP110 |
+| [`CHANGELOG.md`](CHANGELOG.md) | All generations |
+| [`docs/comparison.md`](docs/comparison.md) | Side-by-side comparison |
 
 ---
 
 ## How to Cite
 
-If you use this software in academic work, please cite **the specific
-version you used** (Version DOI is stable and does not change):
+If you use this software in academic work, please cite:
 
 ```bibtex
 @software{damsarkho2026isaac,
@@ -382,21 +415,14 @@ version you used** (Version DOI is stable and does not change):
   year         = 2026,
   publisher    = {Zenodo},
   version      = {3.1.3},
-  doi          = {10.5281/zenodo.23672149},
-  url          = {https://doi.org/10.5281/zenodo.23672149}
+  doi          = {10.5281/zenodo.23312011},
+  url          = {https://doi.org/10.5281/zenodo.23312011}
 }
 ```
 
 Or in plain text:
 
-> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23672149
-
-> **Note on DOIs:** the badge at the top of this file uses the
-> **Concept DOI** (`10.5281/zenodo.23312011`) — it always resolves to
-> the **latest** release. The citation above uses the **Version DOI**
-> (`10.5281/zenodo.23672149`) — it is pinned to **v3.1.3**. If you want
-> to cite "whatever is latest at the time of reading", use the Concept
-> DOI instead, and omit the `version` field.
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
 
 ---
 
