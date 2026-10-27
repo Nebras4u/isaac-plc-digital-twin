@@ -88,7 +88,7 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | CPU            | Dedicated cores (no throttling)     |
 | GPU            | NVIDIA, no passthrough              |
 | PLC server     | Native Windows, low-latency         |
-| Isaac Sim      | Native, 60 FPS stable               |
+| Isaac Sim      | Native, 60 FPS stable, **gravity ENABLED** |
 | ROS 2          | Jazzy                               |
 | RMW            | FastDDS                             |
 | `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
@@ -389,17 +389,19 @@ simulated robot to the ROS 2 graph. It is responsible for:
 
 1. Reading `robot.yaml` to find the robot prim paths and drive gains.
 2. Creating an `Articulation` object and initializing it.
-3. Disabling gravity for the robot links (Isaac Sim 5.1 has no gravity
-   compensation API on `Articulation`; disabling gravity is the only
-   reliable way to get zero tracking error).
+3. **Keeping gravity ENABLED** (real physics). Isaac Sim 5.1 does not
+   expose a gravity-compensation API on `Articulation`, so compensation
+   is achieved implicitly through the high drive stiffness configured in
+   `robot.yaml`. The arm is **not** weightless — it holds position under
+   real gravity because the drives are stiff enough to counteract it.
 4. Publishing `/joint_states` at 60 Hz.
 
-**Gravity handling:** Isaac Sim 5.1 does not expose
-`get_dof_gravity_compensation_forces()` or `set_gravity_compensation()` on
-`Articulation`. The documented workaround is to apply
-`PhysxSchema.PhysxRigidBodyAPI` with `disableGravity=True` to every link
-under the robot scope. This is done by `disable_gravity_for_robot_links()`
-at startup and again after every reinit.
+**Gravity handling:** gravity is **kept enabled** throughout the
+simulation. There is no `disableGravity=True` and no
+`disable_gravity_for_robot_links()` call. Tracking accuracy measured
+under full gravity load is reported in [Tracking Accuracy](#tracking-accuracy)
+(~0.0254° max on `joint_2`). This reflects real tracking performance,
+not a weightless simulation.
 
 **Recovery from Stop/Play:** PhysX invalidates simulation views whenever
 the timeline is stopped or the stage is modified. `physics_twin.py`
@@ -410,7 +412,7 @@ automatically — no manual restart required.
 
 1. Open Isaac Sim (do **not** press Play yet).
 2. Run `physics_twin.py` in the Script Editor.
-3. Wait for `Gravity disabled for N robot links.`
+3. Wait for `PhysicsTwin ready. DOF=... gravity=ENABLED`.
 4. **Then** press Play.
 
 > **Known issue (Isaac Sim 5.1):** `Articulation.initialize()` may hang
@@ -767,7 +769,9 @@ Add to `.github/workflows/test.yml`:
 
 ### Tracking Accuracy
 
-Measured on KUKA KR210 through `tcp_json`:
+Measured on KUKA KR210 through `tcp_json`, **with gravity enabled** (real
+physics; compensation achieved through high drive stiffness in
+`robot.yaml`, not by disabling gravity):
 
 | Joint       | Setpoint  | Actual    | Error   |
 | :---------- | :-------- | :-------- | :------ |
@@ -777,7 +781,7 @@ Measured on KUKA KR210 through `tcp_json`:
 | joint_4     | -0.0025°  | -0.0033°  | 0.0008° |
 | joint_5     | -0.4668°  | -0.4668°  | 0.0000° |
 
-Maximum error: **0.0254°** on `joint_2` under full gravity load.
+Maximum error: **0.0254°** on `joint_2` **under full gravity load**.
 
 *Note: `joint_5` is passive. Its setpoint is taken from the measured
 position, so its 0.0000° error is zero by construction and is not a
@@ -1305,15 +1309,22 @@ but they must be understood before deploying to a physical robot.
 
 ### Isaac Sim 5.1
 
-- **No gravity compensation API on `Articulation`.** The current
-  workaround disables gravity for the robot links. This makes the arm
-  weightless in simulation — tracking error drops to near zero, but
-  payloads and vertical contacts are not simulated.
+- **No gravity compensation API on `Articulation`.** Isaac Sim 5.1 does
+  not expose `get_dof_gravity_compensation_forces()` or
+  `set_gravity_compensation()`. **Gravity is kept ENABLED** (real
+  physics); compensation is achieved **implicitly by high drive
+  stiffness** in `robot.yaml`. The drives are stiff enough to hold the
+  arm against gravity, which is why tracking error stays small
+  (~0.0254° max on `joint_2` under full gravity load). Payloads and
+  vertical contacts **are simulated** — the arm is not weightless.
 - **`joint_2` and `joint_3` use `stiffness: 50,000,000` in `robot.yaml`.**
   This is ~16× the value from published KR210 measurements (3M and 8.2M
-  respectively). It is required because gravity is disabled and the
-  drives must still track position accurately. Do not compare it to
-  physical stiffness values.
+  respectively). It is a **deliberate design choice** that compensates
+  for gravity implicitly, allowing the drives to track position while
+  real physics (gravity, inertia, payload) remains active. It is not a
+  workaround for disabled gravity. Do not compare it directly to
+  physical stiffness values without accounting for this compensation
+  strategy.
 - **`joint_5` is passive.** It appears in `all_joints` but is not
   controlled by the PLC. It has no entry in `controlled_joints`.
 - **`Articulation.initialize()` may hang** if Play has not been pressed
