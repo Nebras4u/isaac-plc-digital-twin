@@ -324,10 +324,8 @@ not by rewriting the core platform.
 │   ├── config/
 │   ├── plc/
 │   └── tools/
-├── archive/
-│   ├── kuka/                    # Gen 1 — KUKA KR210 (TCP/JSON)
-│   └── yaskawa/                 # Gen 2 — Yaskawa GP110 (OPC UA)
-├── docs/                        # Cross-generation documentation
+├── kuka/                    # Gen 1 — KUKA KR210 (TCP/JSON)
+├── yaskawa/                 # Gen 2 — Yaskawa GP110 (OPC UA)
 └── README.md                    # This file
 ```
 
