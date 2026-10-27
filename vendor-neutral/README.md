@@ -12,7 +12,7 @@
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#control-loop-latency-reference)
 [![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#control-loop-latency-reference)
-[![VM post-v3.1.4](https://img.shields.io/badge/VM%20post--v3.1.4%20p50-18.55%20ms-blueviolet)](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+[![VM post-v3.1.4](https://img.shields.io/badge/VM%20post--v3.1.4%20p50-18.55%20ms-blueviolet)](#v314--plc-batch-mode--120-hz-tuning-this-machine)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -63,7 +63,7 @@ platform.
   - [Bridge Real-Time Behaviour](#bridge-real-time-behaviour)
   - [Clock Drift Calibration](#clock-drift-calibration)
   - [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
-  - [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+  - [v3.1.4 — PLC batch mode + 120 Hz tuning](#v314--plc-batch-mode--120-hz-tuning-this-machine)
 - [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
 - [Lineage](#lineage)
@@ -99,7 +99,7 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 > `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
 > **not** on the reference machine. The reference machine has **not
 > been re-measured** for v3.1.4. See
-> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v314--plc-batch-mode--120-hz-tuning-this-machine)
 > for VM results, which use a different metric (`total_loop` p50) and
 > are not comparable to the mean/max shown above.
 
@@ -107,7 +107,7 @@ The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
 [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
 and
-[v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
+[v3.1.4 — PLC batch mode + 120 Hz tuning](#v314--plc-batch-mode--120-hz-tuning-this-machine).
 This is expected and does not indicate a regression.
 
 **How to measure on your machine:**
@@ -793,7 +793,7 @@ tracking result.*
 > **native Ubuntu 24.04** reference machine described in
 > [Environment](#environment). They predate v3.1.4. See
 > [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
-> and [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+> and [v3.1.4 — PLC batch mode + 120 Hz tuning](#v314--plc-batch-mode--120-hz-tuning-this-machine)
 > for VM numbers, which use different metrics and are **not directly
 > comparable**.
 
@@ -1026,7 +1026,7 @@ machine's hardware.
 > PLCSIM Advanced V6.0, FastDDS). **Not** the reference machine.
 > These are the **v3.1.2** numbers that serve as the baseline for
 > v3.1.4. For the v3.1.4 comparison (batch ON, 120 Hz), see
-> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine).
+> [v3.1.4 — PLC batch mode + 120 Hz tuning](#v314--plc-batch-mode--120-hz-tuning-this-machine).
 
 Measured after the v3.1.2 fixes described below.
 
