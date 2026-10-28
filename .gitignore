@@ -11,3 +11,4 @@ latency_probe.csv
 venv/
 test.txt
 vendor-neutral/config/test_file.txt
+release_v3.7/
