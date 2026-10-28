@@ -127,7 +127,7 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
 - **`plc_ros_bridge.py` — `probe_attempted` counter (new).**
   Distinguishes "bridge didn't publish a tag" (`probe_sent == 0`) from
   "tag arrived but was rejected" (`probe_attempted > probe_rows`).
-  In production, `probe_attempted == probe_rows == 2691` (100% capture).
+  In production, probe_attempted == probe_rows == 1396 (100% capture).
 - **`plc_ros_bridge.py` — `_js_tag` starvation fix.**
   `probe_rows/probe_attempted` rose from 7.5% to **100%**.
 - **`plc_ros_bridge.py` — same-tick `act_ang` write.** `write_net`
@@ -205,11 +205,11 @@ Measured across all transports (see
 [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md)
 for the full report):
 
-| Transport                 | Mean      | p99        | Max        | Full Loop |
-| :------------------------ | :-------: | :--------: | :--------: | :-------: |
-| OPC UA (naive)            | 11.5 ms   | 14 ms      | 100 ms     | ~20 ms    |
-| TCP-JSON (naive)          | 12.5 ms   | 20 ms      | 233 ms     | ~25 ms    |
-| **TCP-JSON (optimized)**  | **5.2 ms** | **15.5 ms** | **16.3 ms** | **~15 ms** |
+| Transport                | Mean       | p99        | Max        | Full Loop |
+|:-------------------------|:----------:|:----------:|:----------:|:---------:|
+| OPC UA (naive)           | 11.5 ms    | 14 ms      | 100 ms     | ~20 ms    |
+| TCP-JSON (naive)         | 12.5 ms    | 20 ms      | 233 ms     | ~25 ms    |
+| **TCP-JSON (optimized)** | **5.2 ms** | **15.5 ms**| **16.3 ms**| **~15 ms**|
 
 **Optimization techniques applied:**
 
@@ -238,46 +238,45 @@ Measured on a **different environment** than the reference machine:
 | ROS 2        | Jazzy                                  |
 | RMW          | FastDDS                                |
 
-**v3.7 full-loop latency** (60 s motion, `cmd_ang: [cmd_ang]`,
-n=2691 records):
+**v3.7 full-loop latency** (60 s motion, `cmd_ang: [cmd_ang]`, n=1396 records):
 
-| Stage          | p50      | p95      | p99      | p99.9    |
-| :------------- | -------: | -------: | -------: | -------: |
-| `queue_delay`  | 3.08 ms  | 3.53 ms  | 3.61 ms  | 4.08 ms  |
-| `read_net`     | 1.72 ms  | 3.90 ms  | 17.11 ms | 46.83 ms |
-| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.11 ms  | 0.14 ms  |
-| `ros_ruckig`   | 3.08 ms  | 6.46 ms  | 8.31 ms  | 9.06 ms  |
-| `isaac_step`   | 5.15 ms  | 8.39 ms  | 9.50 ms  | 11.05 ms |
-| `ros_back`     | 0.29 ms  | 0.44 ms  | 0.65 ms  | 3.12 ms  |
-| `write_net`    | 4.73 ms  | 13.42 ms | 40.48 ms | 75.46 ms |
-| **`cmd_to_feedback`** | **14.48 ms** | **23.38 ms** | **45.91 ms** | **86.45 ms** |
-| **`total_loop`** | **19.04 ms** | **29.25 ms** | **60.88 ms** | **89.61 ms** |
+| Stage             | p50      | p95      | p99      | p99.9    |
+|:------------------|---------:|---------:|---------:|---------:|
+| `queue_delay`     | 3.08 ms  | 3.53 ms  | 3.61 ms  | 4.08 ms  |
+| `read_net`        | 1.72 ms  | 3.90 ms  | 17.11 ms | 46.83 ms |
+| `convert_pub`     | 0.05 ms  | 0.08 ms  | 0.11 ms  | 0.14 ms  |
+| `ros_ruckig`      | 3.08 ms  | 6.46 ms  | 8.31 ms  | 9.06 ms  |
+| `isaac_step`      | 5.15 ms  | 8.39 ms  | 9.50 ms  | 11.05 ms |
+| `ros_back`        | 0.29 ms  | 0.44 ms  | 0.65 ms  | 3.12 ms  |
+| `write_net`       | 4.73 ms  | 13.42 ms | 40.48 ms | 75.46 ms |
+| `cmd_to_feedback` | 14.62 ms | 22.62 ms | 35.50 ms | 96.69 ms |
+| `total_loop`      | 19.21 ms | 28.06 ms | 44.50 ms | 101.67 ms|
 
 **LBP (Latency Bound Probability) — `cmd_to_feedback`:**
 
-| Threshold | LBP      |
-| :-------- | -------: |
-| ≤ 10 ms   | 21.96%   |
-| ≤ 15 ms   | 60.47%   |
-| **≤ 20 ms** | **90.37%** |
-| ≤ 30 ms   | 97.29%   |
-| ≤ 40 ms   | 98.44%   |
-| ≤ 50 ms   | 99.10%   |
+| Threshold | LBP     |
+|:----------|--------:|
+| ≤ 10 ms   | 21.96%  |
+| ≤ 15 ms   | 60.47%  |
+| ≤ 20 ms   | 91.40%  |
+| ≤ 30 ms   | 97.64%  |
+| ≤ 40 ms   | 99.14%  |
+| ≤ 50 ms   | 99.43%  |
 
 **Comparison v3.1.3 → v3.7 (same VM):**
 
-| Stage          | v3.1.3   | **v3.7**     | Δ |
-| :------------- | -------: | -----------: | -: |
-| `queue_delay`  | 5.87 ms  | **3.08 ms**  | −48% |
-| `read_net`     | 1.36 ms  | 1.72 ms      | +26% |
-| `ros_ruckig`   | 4.32 ms  | **3.08 ms**  | −29% |
-| `isaac_step`   | 9.71 ms  | **5.15 ms**  | −47% |
-| `write_net`    | 5.28 ms  | **4.73 ms**  | −10% |
-| **`cmd_to_feedback`** | **18.55 ms** | **14.48 ms** | **−22%** |
-| **`total_loop`** | **25.72 ms** | **19.04 ms** | **−26%** |
-| LBP ≤ 20 ms    | 59.17%   | **90.37%**   | **+31pp** |
+| Stage             | v3.1.3   | **v3.7**     |     Δ |
+|:------------------|---------:|-------------:|------:|
+| `queue_delay`     | 5.87 ms  | **3.08 ms**  |  −48% |
+| `read_net`        | 1.36 ms  | 1.72 ms      |  +26% |
+| `ros_ruckig`      | 4.32 ms  | **3.08 ms**  |  −29% |
+| `isaac_step`      | 9.71 ms  | **5.15 ms**  |  −47% |
+| `write_net`       | 5.28 ms  | **4.73 ms**  |  −10% |
+| `cmd_to_feedback` | 18.55 ms | 14.62 ms     |  −21% |
+| `total_loop`      | 25.72 ms | 19.21 ms     |  −25% |
+| LBP ≤ 20 ms       | 59.17%   | 91.40%       | +32pp |
 
-**Probe health:** `probe_attempted == probe_rows == 2691`,
+**Probe health:** `probe_attempted == probe_rows == 1396`,
 `probe_rejected == 0`, `probe_order_violations == 0`,
 `write_failed == 0`.
 
@@ -365,14 +364,14 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
 ## Documentation
 
-| Document | Description |
-| :--- | :--- |
-| [`vendor-neutral/README.md`](vendor-neutral/README.md) | Gen 3 (active) — vendor-neutral platform |
+| Document                                                                                 | Description                               |
+| :--------------------------------------------------------------------------------------- | :-----------------------------------------|
+| [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 3 (active) — vendor-neutral platform  |
 | [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports |
-| [`kuka/README.md`](kuka/README.md) | Gen 1 — KUKA KR210 |
-| [`yaskawa/docs/README.md`](yaskawa/docs/README.md) | Gen 2 — Yaskawa GP110 |
-| [`CHANGELOG.md`](CHANGELOG.md) | All generations |
-| [`docs/comparison.md`](docs/comparison.md) | Side-by-side comparison |
+| [`kuka/README.md`](kuka/README.md)                                                       | Gen 1 — KUKA KR210                        |
+| [`yaskawa/docs/README.md`](yaskawa/docs/README.md)                                       | Gen 2 — Yaskawa GP110                     |
+| [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                           |
+| [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                   |
 
 ---
 
