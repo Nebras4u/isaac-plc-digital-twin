@@ -1,6 +1,20 @@
 # trajectory_twin.py
 # Vendor-neutral Ruckig-based trajectory generator.
 # Reads robot definition from robot.yaml.
+#
+# Fixes in this revision (v3.6):
+#   * [A] Removed np.interp on the full joint vector (passive axes preserved).
+#   * [B] needs_target_update compares against _last_applied_cmd_deg.
+#   * [C] _last_applied_cmd_deg guarded under lock.
+#   * [D] STOPPING→IDLE clears _last_applied_cmd_deg.
+#   * [E] RuckigPlanner validates all params at construction.
+#   * [F] _cmd_tag is NOT consumed by servo_tick anymore. It is only
+#     cleared by _publish() AFTER the tag has actually been attached to
+#     an outgoing /servo_setpoints message. Previously every tick cleared
+#     it — so ticks that didn't publish (needs_target_update=False,
+#     STOPPING without step, etc.) silently ate the tag, producing
+#     /servo_setpoints messages with a 5-part frame_id instead of 6 and
+#     breaking the latency-probe chain.
 
 import math
 import os
@@ -23,72 +37,75 @@ IDLE, RUNNING, STOPPING = 0, 1, 2
 
 
 def _validate_limits(limits_deg, joints):
-    """Industrial sanity: lower < upper, plausible range."""
     for j in joints:
         if j not in limits_deg:
             raise ValueError(f"robot.yaml: joint '{j}' missing limits_deg")
         lim = limits_deg[j]
         if not (isinstance(lim, (list, tuple)) and len(lim) == 2):
-            raise ValueError(
-                f"joint '{j}': limits_deg must be [lower, upper], got {lim!r}"
-            )
+            raise ValueError(f"joint '{j}': limits_deg must be [lower, upper]")
         lo, hi = lim
-        if not (isinstance(lo, (int, float)) and isinstance(hi, (int, float))):
-            raise ValueError(
-                f"joint '{j}': limits must be numeric, got {lim!r}"
-            )
         if lo >= hi:
-            raise ValueError(
-                f"joint '{j}': lower {lo}° >= upper {hi}° "
-                f"(limits are [lower, upper])"
-            )
+            raise ValueError(f"joint '{j}': lower {lo}° >= upper {hi}°")
         if hi - lo > 720.0:
-            raise ValueError(
-                f"joint '{j}': range {hi - lo:.1f}° is implausibly large "
-                f"(>720°, check units)"
-            )
+            raise ValueError(f"joint '{j}': range {hi - lo:.1f}° is implausibly large")
 
 
 class RuckigPlanner:
-    def __init__(self, dof, control_hz, max_vel, max_acc, max_jerk, jump_threshold):
+    def __init__(self, dof, control_hz, max_vel, max_acc, max_jerk,
+                 jump_threshold, brake_acc_mult, brake_jerk_mult):
         if not (0 < control_hz <= 1000):
             raise ValueError(
-                f"ruckig.control_hz must be in (0, 1000], got {control_hz}"
-            )
-        if max_vel <= 0:
-            raise ValueError(f"ruckig.max_vel must be > 0, got {max_vel}")
-        if max_acc <= 0:
-            raise ValueError(f"ruckig.max_acc must be > 0, got {max_acc}")
-        if max_jerk <= 0:
-            raise ValueError(f"ruckig.max_jerk must be > 0, got {max_jerk}")
-        if jump_threshold <= 0:
-            raise ValueError(
-                f"ruckig.jump_threshold_rad must be > 0, got {jump_threshold}"
-            )
+                f"ruckig.control_hz must be in (0, 1000], got {control_hz}")
 
         self.dof = dof
         self.dt  = 1.0 / control_hz
-        self.jump_threshold = jump_threshold
         self.otg = Ruckig(dof, self.dt)
         self.inp = InputParameter(dof)
         self.out = OutputParameter(dof)
 
-        self._max_vel  = max_vel
-        self._max_acc  = max_acc
-        self._max_jerk = max_jerk
+        def to_array(val):
+            if isinstance(val, (list, tuple, np.ndarray)):
+                return [float(v) for v in val]
+            return [float(val)] * dof
 
-        self._brake_acc  = max_acc  * 4.0
-        self._brake_jerk = max_jerk * 8.0
+        self._max_vel  = to_array(max_vel)
+        self._max_acc  = to_array(max_acc)
+        self._max_jerk = to_array(max_jerk)
 
-        self.inp.max_velocity     = [max_vel]  * dof
-        self.inp.max_acceleration = [max_acc]  * dof
-        self.inp.max_jerk         = [max_jerk] * dof
+        for name, arr in (("max_vel",  self._max_vel),
+                          ("max_acc",  self._max_acc),
+                          ("max_jerk", self._max_jerk)):
+            if len(arr) != dof:
+                raise ValueError(
+                    f"ruckig.{name} length {len(arr)} != dof {dof}")
+            if any(v <= 0 for v in arr):
+                raise ValueError(
+                    f"ruckig.{name} must be > 0 for every axis, got {arr}")
+
+        if jump_threshold <= 0:
+            raise ValueError(
+                f"ruckig.jump_threshold_rad must be > 0, got {jump_threshold}")
+        if brake_acc_mult <= 0 or brake_jerk_mult <= 0:
+            raise ValueError(
+                "ruckig.brake_*_mult must be > 0, got "
+                f"brake_acc_mult={brake_acc_mult}, "
+                f"brake_jerk_mult={brake_jerk_mult}")
+
+        self.jump_threshold = float(jump_threshold)
+        self._brake_acc  = [a * float(brake_acc_mult)  for a in self._max_acc]
+        self._brake_jerk = [j * float(brake_jerk_mult) for j in self._max_jerk]
+
+        self.inp.max_velocity        = self._max_vel
+        self.inp.max_acceleration    = self._max_acc
+        self.inp.max_jerk            = self._max_jerk
         self.inp.target_velocity     = [0.0] * dof
         self.inp.target_acceleration = [0.0] * dof
+
         self._initialized = False
-        self._stopped = True
-        self._has_target = False
-        self._last_pos = np.zeros(dof)
+        self._stopped     = True
+        self._has_target  = False
+        self._last_pos    = np.zeros(dof)
+        self._target_pos  = np.zeros(dof)
 
     def reset(self, m):
         m = np.asarray(m, dtype=np.float64)
@@ -98,19 +115,20 @@ class RuckigPlanner:
         self.inp.current_acceleration = [0.0] * self.dof
         self.inp.target_velocity      = [0.0] * self.dof
         self.inp.target_acceleration  = [0.0] * self.dof
-        self.inp.max_velocity     = [self._max_vel]  * self.dof
-        self.inp.max_acceleration = [self._max_acc]  * self.dof
-        self.inp.max_jerk         = [self._max_jerk] * self.dof
+        self.inp.max_velocity         = self._max_vel
+        self.inp.max_acceleration     = self._max_acc
+        self.inp.max_jerk             = self._max_jerk
         np.copyto(self._last_pos, m)
         self._initialized = True
-        self._has_target = False
-        self._stopped = False
+        self._has_target  = False
+        self._stopped     = False
 
     def set_target(self, t):
         t = np.asarray(t, dtype=np.float64)
         if not np.all(np.isfinite(t)):
             return False
         self.inp.target_position = t.tolist()
+        np.copyto(self._target_pos, t)
         self._has_target = True
         return True
 
@@ -123,12 +141,12 @@ class RuckigPlanner:
         np.copyto(self._last_pos, m)
 
     def start_brake(self):
-        self.inp.control_interface = ControlInterface.Velocity
-        self.inp.target_velocity = [0.0] * self.dof
+        self.inp.control_interface   = ControlInterface.Velocity
+        self.inp.target_velocity     = [0.0] * self.dof
         self.inp.target_acceleration = [0.0] * self.dof
-        self.inp.max_acceleration = [self._brake_acc]  * self.dof
-        self.inp.max_jerk         = [self._brake_jerk] * self.dof
-        self._stopped = False
+        self.inp.max_acceleration    = self._brake_acc
+        self.inp.max_jerk            = self._brake_jerk
+        self._stopped                = False
 
     def step(self):
         if not self._initialized:
@@ -143,6 +161,7 @@ class RuckigPlanner:
             if braking:
                 self._stopped = True
             return np.array(self.inp.current_position)
+
         self.out.pass_to_input(self.inp)
         if braking and res == Result.Finished:
             self._stopped = True
@@ -160,88 +179,107 @@ class TrajectoryTwin(Node):
         with open(self.get_parameter("robot").value) as f:
             cfg = yaml.safe_load(f)["robot"]
 
-        self.robot_name = cfg["name"]
-        self.all_joints = cfg["all_joints"]
+        self.robot_name        = cfg["name"]
+        self.all_joints        = cfg["all_joints"]
         self.controlled_joints = cfg["controlled_joints"]
-        self.limits_deg = cfg["limits_deg"]
+        self.limits_deg        = cfg["limits_deg"]
 
         _validate_limits(self.limits_deg, self.controlled_joints)
 
-        self.dof = len(self.all_joints)
-        self.name_to_idx = {n: i for i, n in enumerate(self.all_joints)}
+        self.all_dof  = len(self.all_joints)
+        self.ctrl_dof = len(self.controlled_joints)
+        self.name_to_idx  = {n: i for i, n in enumerate(self.all_joints)}
+        self.ctrl_indices = [self.name_to_idx[j] for j in self.controlled_joints]
 
         r = cfg["ruckig"]
         self.planner = RuckigPlanner(
-            self.dof, r["control_hz"], r["max_vel"], r["max_acc"],
-            r["max_jerk"], r["jump_threshold_rad"],
+            self.ctrl_dof,
+            r["control_hz"],
+            r.get("max_vel", 6.0),
+            r.get("max_acc", 20.0),
+            r.get("max_jerk", 400.0),
+            r.get("jump_threshold_rad", 0.3),
+            r.get("brake_acc_mult", 4.0),
+            r.get("brake_jerk_mult", 8.0),
         )
 
         log_cfg = {"logging": cfg.get("logging", {})} if "logging" in cfg else {
-            "logging": {
-                "level": "INFO",
-                "console": True,
-                "to_ros": False,
-                "file": "/workspace/plc_bridge_logs/trajectory.log",
-                "json_file": "/workspace/plc_bridge_logs/trajectory.jsonl",
-                "max_bytes": 10 * 1024 * 1024,
-                "backup_count": 5,
-            }
+            "logging": {"level": "INFO", "console": True, "to_ros": False,
+                        "file": "/workspace/plc_bridge_logs/trajectory.log",
+                        "json_file": "/workspace/plc_bridge_logs/trajectory.jsonl",
+                        "max_bytes": 10 * 1024 * 1024, "backup_count": 5}
         }
         self.log = setup_logging(
-            log_cfg,
-            logger_name="trajectory_twin",
-            ros_logger=self.get_logger(),
+            log_cfg, logger_name="trajectory_twin", ros_logger=self.get_logger()
         )
 
-        self.setpoint_pub = self.create_publisher(JointState, "/servo_setpoints", 1)
-        self.lock = threading.Lock()
-        self._actual = np.zeros(self.dof)
-        self._has_actual = False
-        self._last_js_t = 0.0
-        self._enable = False
-        self._estop = True
-        self._cmd_deg = [0.0] * len(self.controlled_joints)
-        self._cmd_ok = False
-        self._last_cmd_t = 0.0
-        self._state = IDLE
-        self._msg = JointState()
-        self._msg.name = list(self.all_joints)
+        stream_qos = QoSProfile(depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
+        self.setpoint_pub = self.create_publisher(
+            JointState, "/servo_setpoints", stream_qos)
 
-        self._last_setpoint_log = 0.0
+        # ------------------------------------------------------------------
+        # State (all guarded by self.lock unless noted)
+        # ------------------------------------------------------------------
+        self.lock = threading.Lock()
+
+        self._actual       = np.zeros(self.all_dof)
+        self._has_actual   = False
+        self._last_js_t    = 0.0
+
+        self._enable       = False
+        self._estop        = True
+
+        self._cmd_deg      = [0.0] * self.ctrl_dof
+        self._last_received_cmd_deg = [None] * self.ctrl_dof
+        self._last_applied_cmd_deg  = None
+
+        self._cmd_ok       = False
+        self._last_cmd_t   = 0.0
+        self._state        = IDLE
+
+        self._msg = JointState()
+        self._msg.name     = list(self.all_joints)
+        self._msg.position = [0.0] * self.all_dof
+        self._msg.velocity = [0.0] * self.all_dof
+        self._msg.header.frame_id = ""
+
+        self._ctrl_actual = np.zeros(self.ctrl_dof)
+        self._ctrl_target = np.zeros(self.ctrl_dof)
+
+        self._last_setpoint_log  = 0.0
         self._cmd_timeout_logged = False
         self._no_feedback_logged = False
-        self._estop_logged = False
-        self._last_cmd_logged = None
-        self._bad_cmd_logged = False
-        self._cmd_tag = ""
+        self._bad_cmd_logged     = False
+        # v3.6 [F]: the tag is kept here until _publish() actually attaches
+        # it to an outgoing message. Never consumed inside servo_tick.
+        self._cmd_tag            = ""
+        self._cmd_tag_t          = 0.0   # monotonic time when the tag arrived
 
-        state_qos = QoSProfile(
-            depth=1,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-        )
+        # ------------------------------------------------------------------
+        # Subscriptions
+        # ------------------------------------------------------------------
+        state_qos = QoSProfile(depth=1,
+                               durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(JointState, "/joint_states",
+                                 self.on_js, stream_qos)
+        self.create_subscription(JointState, "/plc/cmd_ang",
+                                 self.on_cmd, stream_qos)
+        self.create_subscription(Bool, "/plc/axis_enable",
+                                 self.on_enable, state_qos)
+        self.create_subscription(Bool, "/plc/emergency_stop",
+                                 self.on_estop, state_qos)
 
-        stream_qos = QoSProfile(
-            depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
-        self.create_subscription(JointState, "/joint_states", self.on_js, stream_qos)
-        self.create_subscription(JointState, "/plc/cmd_ang", self.on_cmd, stream_qos)
-        self.create_subscription(
-            Bool, "/plc/axis_enable", self.on_enable, state_qos
-        )
-        self.create_subscription(
-            Bool, "/plc/emergency_stop", self.on_estop, state_qos
-        )
         self.create_timer(1.0 / r["control_hz"], self.servo_tick)
 
-        self.log.info(
-            "twin_started",
-            extra={
-                "robot": self.robot_name,
-                "dof": self.dof,
-                "controlled": self.controlled_joints,
-                "rate_hz": r["control_hz"],
-            },
-        )
+        self.log.info("twin_started", extra={
+            "robot":   self.robot_name,
+            "dof":     self.ctrl_dof,
+            "rate_hz": r["control_hz"],
+        })
 
+    # --------------------------------------------------------------------- #
+    # Callbacks
+    # --------------------------------------------------------------------- #
     def on_js(self, msg):
         with self.lock:
             for n, p in zip(msg.name, msg.position):
@@ -252,19 +290,21 @@ class TrajectoryTwin(Node):
             self._last_js_t = time.monotonic()
 
     def on_cmd(self, msg):
-        n = len(self.controlled_joints)
+        n = self.ctrl_dof
         with self.lock:
             if len(msg.position) >= n:
                 new_cmd = [float(x) for x in msg.position[:n]]
-                if new_cmd != self._last_cmd_logged:
-                    self._last_cmd_logged = list(new_cmd)
-                    self.log.info(
-                        "cmd_received",
-                        extra={"cmd_deg": new_cmd},
-                    )
+                if new_cmd != self._last_received_cmd_deg:
+                    self._last_received_cmd_deg = list(new_cmd)
+                    self.log.info("cmd_received", extra={"cmd_deg": new_cmd})
                 self._cmd_deg = new_cmd
                 tag = msg.header.frame_id
-                self._cmd_tag = tag if tag.startswith("p;") else ""
+                if tag.startswith("p;"):
+                    self._cmd_tag   = tag
+                    self._cmd_tag_t = time.monotonic()
+                else:
+                    self._cmd_tag   = ""
+                    self._cmd_tag_t = 0.0
                 self._cmd_ok = True
                 self._last_cmd_t = time.monotonic()
 
@@ -285,141 +325,166 @@ class TrajectoryTwin(Node):
                     self.log.info("estop_cleared")
             self._estop = new
 
-    def get_feedback(self):
-        with self.lock:
-            fresh = self._has_actual and (time.monotonic() - self._last_js_t) <= 0.5
-            return fresh, self._actual.copy()
-
-    def build_target(self, cmd_deg, actual):
-        t = actual.copy()
-        for i, j in enumerate(self.controlled_joints):
-            idx = self.name_to_idx[j]
-            deg = cmd_deg[i]
-            lo, hi = self.limits_deg[j]
-            if not math.isfinite(deg) or deg < lo or deg > hi:
-                return None
-            t[idx] = math.radians(deg)
-        return t
-
+    # --------------------------------------------------------------------- #
+    # Servo tick
+    # --------------------------------------------------------------------- #
     def servo_tick(self):
-        with self.lock:
-            enable, estop = self._enable, self._estop
-            cmd, cmd_ok = list(self._cmd_deg), self._cmd_ok
-            last_cmd_t = self._last_cmd_t
-        fresh, actual = self.get_feedback()
+        now = time.monotonic()
 
-        if (time.monotonic() - last_cmd_t) > 0.5:
+        with self.lock:
+            enable        = self._enable
+            estop         = self._estop
+            cmd           = list(self._cmd_deg)
+            cmd_ok        = self._cmd_ok
+            last_cmd_t    = self._last_cmd_t
+            actual        = self._actual.copy()
+            has_actual    = self._has_actual
+            last_js_t     = self._last_js_t
+            last_applied  = self._last_applied_cmd_deg
+            # v3.6 [F]: read the tag but do NOT clear it here.
+            tag           = self._cmd_tag
+            tag_t         = self._cmd_tag_t
+
+        # ---- freshness checks -----------------------------------------
+        fresh = has_actual and (now - last_js_t) <= 0.5
+
+        if (now - last_cmd_t) > 0.5:
             if cmd_ok and not self._cmd_timeout_logged:
-                self.log.warning(
-                    "cmd_timeout",
-                    extra={"last_cmd_age_s": round(time.monotonic() - last_cmd_t, 2)},
-                )
+                self.log.warning("cmd_timeout", extra={
+                    "last_cmd_age_s": round(now - last_cmd_t, 2)})
                 self._cmd_timeout_logged = True
             cmd_ok = False
         else:
             self._cmd_timeout_logged = False
 
-        if not fresh and self._has_actual:
+        if not fresh and has_actual:
             if not self._no_feedback_logged:
-                self.log.error(
-                    "no_feedback",
-                    extra={"last_js_age_s": round(time.monotonic() - self._last_js_t, 2)},
-                )
+                self.log.error("no_feedback", extra={
+                    "last_js_age_s": round(now - last_js_t, 2)})
                 self._no_feedback_logged = True
         else:
             self._no_feedback_logged = False
 
         want_run = enable and (not estop) and fresh and cmd_ok
 
+        np.copyto(self._ctrl_actual, actual[self.ctrl_indices])
+
+        # ---- run path -------------------------------------------------
         if want_run and self._state != STOPPING:
-            target = self.build_target(cmd, actual)
-            if target is None:
+            target = self._ctrl_actual.copy()
+            valid = True
+            for i, j in enumerate(self.controlled_joints):
+                deg = cmd[i]
+                lo, hi = self.limits_deg[j]
+                if not math.isfinite(deg) or deg < lo or deg > hi:
+                    valid = False
+                    break
+                target[i] = math.radians(deg)
+
+            if not valid:
                 if not self._bad_cmd_logged:
                     self._bad_cmd_logged = True
-                    self.log.warning(
-                        "bad_command",
-                        extra={
-                            "cmd_deg": cmd,
-                            "limits": {j: self.limits_deg[j]
-                                       for j in self.controlled_joints},
-                        },
-                    )
+                    self.log.warning("bad_command", extra={"cmd_deg": cmd})
                 if self._state == RUNNING:
                     self._begin_brake("bad command")
             else:
                 self._bad_cmd_logged = False
                 if self._state == IDLE:
-                    self.planner.reset(actual)
+                    self.planner.reset(self._ctrl_actual)
                     self.log.info("state_changed",
                                   extra={"from": "IDLE", "to": "RUNNING"})
                     self._state = RUNNING
-                if not self.planner.set_target(target):
-                    self.log.warning("invalid_target",
-                                     extra={"target_rad": target.tolist()})
-                    self._begin_brake("invalid target")
-                else:
-                    self.planner.sync_state(actual)
+
+                needs_target_update = (
+                    last_applied is None or cmd != last_applied
+                )
+                if needs_target_update:
+                    if not self.planner.set_target(target):
+                        self.log.warning("invalid_target",
+                                         extra={"target_rad": target.tolist()})
+                        self._begin_brake("invalid target")
+                    else:
+                        with self.lock:
+                            self._last_applied_cmd_deg = list(cmd)
+
+                self.planner.sync_state(self._ctrl_actual)
+
+                if not self.planner.stopped:
                     sp = self.planner.step()
                     if sp is not None:
-                        self.publish(sp, cmd, actual)
+                        self._publish(sp, tag, tag_t)
+
+        # ---- brake path -----------------------------------------------
         elif (not want_run) and self._state == RUNNING:
-            reason = "fault or disable"
-            if estop:
-                reason = "estop"
-            elif not enable:
-                reason = "disable"
-            elif not fresh:
-                reason = "no feedback"
-            elif not cmd_ok:
-                reason = "cmd timeout"
+            reason = ("estop"      if estop
+                      else "disable" if not enable
+                      else "no feedback" if not fresh
+                      else "cmd timeout")
             self._begin_brake(reason)
 
+        # ---- stopping path --------------------------------------------
         if self._state == STOPPING:
+            self.planner.sync_state(self._ctrl_actual)
             sp = self.planner.step()
             if sp is not None:
-                self.publish(sp, cmd, actual)
+                self._publish(sp, tag, tag_t)
             if self.planner.stopped:
                 self.log.info("state_changed",
                               extra={"from": "STOPPING", "to": "IDLE"})
                 self._state = IDLE
+                with self.lock:
+                    self._last_applied_cmd_deg = None
 
-    def publish(self, positions, cmd_deg=None, actual=None):
+    # --------------------------------------------------------------------- #
+    # Publish — consumes the tag ONLY when actually attached
+    # --------------------------------------------------------------------- #
+    def _publish(self, ctrl_positions, tag, tag_t):
+        pos = self._msg.position
+        for i, idx in enumerate(self.ctrl_indices):
+            pos[idx] = float(ctrl_positions[i])
+
         self._msg.header.stamp = self.get_clock().now().to_msg()
-        self._msg.position = positions.tolist()
-        # A latency-probe tag travels EXACTLY ONCE: it is attached to the first
-        # setpoint after its command arrived and then cleared. Otherwise a
-        # braking/idle setpoint would carry an old tag and be measured as a
-        # multi-second 'latency'. (Do NOT publish extra setpoints in IDLE just
-        # to carry tags: the physics twin would follow the arm and let it sag.)
-        tag = self._cmd_tag
-        self._cmd_tag = ""
-        self._msg.header.frame_id = (
-            f"{tag};{time.monotonic_ns()}" if tag else "")
+        if tag:
+            self._msg.header.frame_id = f"{tag};{time.monotonic_ns()}"
+        else:
+            self._msg.header.frame_id = ""
         self.setpoint_pub.publish(self._msg)
+
+        # v3.6 [F]: consume the tag ONLY after it has been attached to a
+        # real outgoing message. A subsequent tick that publishes without
+        # a new command will see tag="" (correctly) because the previous
+        # command already completed its chain.
+        if tag:
+            with self.lock:
+                # Only clear if no newer tag has arrived in the meantime.
+                if self._cmd_tag_t == tag_t:
+                    self._cmd_tag = ""
+                    self._cmd_tag_t = 0.0
 
         now = time.monotonic()
         if now - self._last_setpoint_log >= 1.0:
             self._last_setpoint_log = now
-
-            lines = [f"{'joint':<10}{'cmd_deg':>12}{'actual_deg':>14}{'diff_deg':>14}",
-                     "-" * 50]
+            lines = [
+                f"{'joint':<10}{'cmd_deg':>12}{'actual_deg':>14}{'diff_deg':>14}",
+                "-" * 50,
+            ]
             for i, j in enumerate(self.controlled_joints):
-                idx = self.name_to_idx[j]
-                c = cmd_deg[i] if cmd_deg is not None else None
-                a = math.degrees(float(actual[idx])) if actual is not None else None
-                d = (c - a) if (c is not None and a is not None) else None
+                idx = self.ctrl_indices[i]
+                c = (math.degrees(float(self.planner._target_pos[i]))
+                     if self.planner._has_target else None)
+                a = math.degrees(float(self._actual[idx]))
+                d = (c - a) if c is not None else None
                 cs = f"{c:>12.3f}" if c is not None else f"{'--':>12}"
-                as_ = f"{a:>14.3f}" if a is not None else f"{'--':>14}"
+                as_ = f"{a:>14.3f}"
                 ds = f"{d:>14.3f}" if d is not None else f"{'--':>14}"
                 lines.append(f"{j:<10}{cs}{as_}{ds}")
-            print("\n".join(lines), flush=True)
+            self.log.info("trajectory_status",
+                          extra={"table": "\n".join(lines)})
 
     def _begin_brake(self, reason):
         if self._state == RUNNING:
-            self.log.warning(
-                "state_changed",
-                extra={"from": "RUNNING", "to": "STOPPING", "reason": reason},
-            )
+            self.log.warning("state_changed", extra={
+                "from": "RUNNING", "to": "STOPPING", "reason": reason})
         self.planner.start_brake()
         self._state = STOPPING
 
@@ -434,7 +499,6 @@ class TrajectoryTwin(Node):
 def main():
     rclpy.init()
     node = TrajectoryTwin()
-    # ← FIX: SingleThreadedExecutor — أفضل من MultiThread في قياساتنا
     executor = rclpy.executors.SingleThreadedExecutor()
     executor.add_node(node)
     try:

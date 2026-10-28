@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""PLC <-> ROS 2 bridge (vendor neutral)."""
+"""PLC <-> ROS 2 bridge (vendor neutral).
+
+v3.7 — adds probe_attempted counter to distinguish "tag arrived but was
+rejected" (e.g. stale > PROBE_MAX_AGE_NS) from "bridge didn't publish a
+tag". This removes the ambiguity of probe_sent=0 in configs where the
+bridge is not the /plc/cmd_ang publisher (e.g. an external test node
+provides the tags instead).
+
+Also adds a defence-in-depth check for _js_tag: it is not consumed unless
+needs_write=True.
+
+v3.6 — same-tick act_ang write.
+v3.4 — initial same-tick refactor.
+"""
 import abc
 import csv
 import json
@@ -21,6 +34,9 @@ from bridge_logger import setup_logging
 from safety import ESTOP_TOPIC, resolve_estop
 
 
+# =============================================================================
+# Latency probe
+# =============================================================================
 class _LatencyProbe:
     """One CSV row per command whose feedback reached the PLC.
 
@@ -30,9 +46,16 @@ class _LatencyProbe:
         physics : ...;js_pub          -> 7 parts in total
     The bridge adds js_recv (when joint_states arrived) and write_done (when
     the feedback carrying that tag was written to the PLC).
+    It also adds hb_counter_val (the PLC heartbeat counter at read time).
+
+    Counters:
+      rows              : successfully written rows
+      attempted         : every record() call (before validation)
+      rejected          : malformed tag / wrong part count / not 'p' prefix
+      order_violations  : timestamps not monotonic; still written, but flagged
     """
     COLS = ["origin_ns", "read_start_ns", "read_done_ns", "cmd_pub_ns",
-            "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns"]
+            "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns", "hb_counter_val"]
     _N_PARTS = 7
     _FLUSH_EVERY_S = 1.0
 
@@ -44,10 +67,12 @@ class _LatencyProbe:
         self._last = None
         self._last_flush = time.monotonic()
         self.rows = 0
-        self.rejected = 0          # malformed tags
-        self.order_violations = 0  # timestamps not non-decreasing along the chain
+        self.attempted = 0
+        self.rejected = 0
+        self.order_violations = 0
 
-    def record(self, tag, js_recv_ns, write_done_ns):
+    def record(self, tag, js_recv_ns, write_done_ns, hb_counter_val=0):
+        self.attempted += 1
         parts = tag.split(";")[: self._N_PARTS]
         if len(parts) != self._N_PARTS or parts[0] != "p":
             self.rejected += 1
@@ -57,17 +82,17 @@ class _LatencyProbe:
         except ValueError:
             self.rejected += 1
             return False
-        if nums[0] == self._last:      # same command already recorded
+        if nums[0] == self._last:
             return False
         self._last = nums[0]
-        chain = nums + [js_recv_ns, write_done_ns]
-        if any(b < a for a, b in zip(chain, chain[1:])):
-            self.order_violations += 1  # still written, but counted
+        chain = nums + [js_recv_ns, write_done_ns, hb_counter_val]
+        if any(b < a for a, b in zip(chain[:8], chain[1:8])):
+            self.order_violations += 1
         self._w.writerow(chain)
         self.rows += 1
         now = time.monotonic()
         if now - self._last_flush >= self._FLUSH_EVERY_S:
-            self._f.flush()             # buffered: no disk flush per row
+            self._f.flush()
             self._last_flush = now
         return True
 
@@ -90,16 +115,17 @@ MSG_TYPES = {"bool": Bool, "int": Int32, "float": Float64, "string": String}
 CAST = {"bool": bool, "int": int, "float": float, "string": str}
 
 JS_STALE_AGE_S = 0.5
-
-# A probe tag older than this when its feedback is written is NOT recorded
-# (it would measure a stale/old command, not the loop).
 PROBE_MAX_AGE_NS = 250_000_000
+ACT_ANG_DEADBAND_DEG = 0.001
 
 PUB_STREAM_QOS = QoSProfile(depth=1)
 SUB_STREAM_QOS = QoSProfile(
     depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
 
+# =============================================================================
+# Drivers — unchanged
+# =============================================================================
 class PlcDriver(abc.ABC):
     @abc.abstractmethod
     def connect(self): ...
@@ -156,6 +182,30 @@ class TcpJsonDriver(PlcDriver):
                 raise RuntimeError(f"stale reply: seq={seq}, last={self._last_seq}")
             self._last_seq = seq
         return resp
+
+    def sync(self, read_addrs, write_values):
+        req = {"cmd": "sync", "read": list(read_addrs)}
+        if write_values:
+            req["write"] = write_values
+
+        t0 = time.perf_counter()
+        resp = self._request(req)
+        t1 = time.perf_counter()
+
+        out = {}
+        for a in read_addrs:
+            v = resp.get("values", {}).get(a)
+            out[a] = None if isinstance(v, str) and v.startswith("ERR:") else v
+
+        failed = []
+        if write_values:
+            for a in write_values:
+                if not resp.get("written", {}).get(a, False):
+                    failed.append(a)
+
+        self._last_sock_ms = (t1 - t0) * 1000.0
+        self._last_parse_ms = 0.0
+        return out, failed
 
     def read(self, addrs):
         t0 = time.perf_counter()
@@ -448,6 +498,9 @@ DRIVERS = {
 }
 
 
+# =============================================================================
+# Bridge
+# =============================================================================
 class PlcRosBridge(Node):
     def __init__(self):
         super().__init__("plc_ros_bridge")
@@ -512,6 +565,7 @@ class PlcRosBridge(Node):
                 "dir":  s.dir,
             }
         self.read_names = [n for n, s in self.sig.items() if s["dir"] == "read"]
+        self._read_addrs = [self.sig[n]["addr"] for n in self.read_names]
 
         if hasattr(self.driver, "set_signal_types"):
             self.driver.set_signal_types({
@@ -567,8 +621,12 @@ class PlcRosBridge(Node):
         self._js_recv_ns = 0
         self._probe_sent = 0
 
-        # ← FIX: يُحدَّث في نهاية كل tick()، ليصبح origin_ns للدورة التالية
         self._last_tick_end_ns = None
+        self._last_written_act_ang = None
+
+        # Pipelining: ONLY hb_ack is genuinely pipeline-bound.
+        self._pending_writes = {}
+        self._pending_ack = None
 
         self.joint_idx = {j: i for i, j in enumerate(self.joints)}
         self._js_lock = threading.Lock()
@@ -631,6 +689,9 @@ class PlcRosBridge(Node):
             extra={"driver": driver_name, "poll_hz": poll_hz},
         )
 
+    # --------------------------------------------------------------------- #
+    # Callbacks
+    # --------------------------------------------------------------------- #
     def on_joint_states(self, msg):
         with self._js_lock:
             if self._probe is not None:
@@ -652,6 +713,11 @@ class PlcRosBridge(Node):
             self._last_tick_ok = time.monotonic()
             self._last_pub.clear()
             self._last_cmd_ang = None
+            self._last_written_act_ang = None
+            self._pending_writes = {}
+            self._pending_ack = None
+            self._js_tag = ""
+            self._js_recv_ns = 0
             self.log.info(
                 "plc_connected",
                 extra={"driver": self.driver_name, "backoff_s": self._backoff},
@@ -727,15 +793,74 @@ class PlcRosBridge(Node):
                 )
             return None
 
+    # --------------------------------------------------------------------- #
+    # tick() — v3.6/v3.7
+    # --------------------------------------------------------------------- #
     def tick(self):
         if not self.connected and not self._try_connect():
             return
         tick_id = int(time.monotonic() * 1000) % 1000000
         t_rs = time.monotonic_ns()
         try:
-            raw = self.driver.read(
-                [self.sig[n]["addr"] for n in self.read_names]
-            )
+            # ---- 1. Take the pipelined hb_ack (only) from PREVIOUS tick --
+            writes_to_send = self._pending_writes
+            ack_to_send = self._pending_ack
+            self._pending_writes = {}
+            self._pending_ack = None
+
+            # ---- 2. Prepare act_ang / cmd_ack / feedback_valid NOW -------
+            probe_tag, probe_recv = "", 0
+            act_written = False
+            with self._js_lock:
+                js_fresh = (
+                    self._js_ok
+                    and self._last_js_t > 0
+                    and (time.monotonic() - self._last_js_t) <= JS_STALE_AGE_S
+                )
+                if self.act_ang and js_fresh:
+                    probe_tag, probe_recv = self._js_tag, self._js_recv_ns
+
+                    ang_deg = [math.degrees(float(x)) for x in self._js_rad]
+
+                    needs_write = (
+                        self._last_written_act_ang is None
+                        or any(abs(n - o) > ACT_ANG_DEADBAND_DEG
+                               for n, o in zip(ang_deg, self._last_written_act_ang))
+                    )
+                    if needs_write:
+                        if len(self.act_ang) == 1:
+                            sig = self.act_ang[0]
+                            writes_to_send[self.sig[sig]["addr"]] = ang_deg
+                        else:
+                            for sig, deg in zip(self.act_ang, ang_deg):
+                                writes_to_send[self.sig[sig]["addr"]] = deg
+                        self._last_written_act_ang = ang_deg
+                        act_written = True
+                        # Consume the tag ONLY when act_ang is written.
+                        self._js_tag = ""
+                    else:
+                        # Do NOT consume the tag; keep for the next tick
+                        # that will actually write. This is the v3.6 fix
+                        # for probe starvation.
+                        act_written = False
+
+                    if self.cmd_ack:
+                        writes_to_send[self.sig[self.cmd_ack]["addr"]] = True
+                    if self.feedback_valid:
+                        writes_to_send[self.sig[self.feedback_valid]["addr"]] = True
+                elif self.act_ang and not js_fresh:
+                    if self.cmd_ack:
+                        writes_to_send[self.sig[self.cmd_ack]["addr"]] = False
+                    if self.feedback_valid:
+                        writes_to_send[self.sig[self.feedback_valid]["addr"]] = False
+
+            # ---- 3. Single RTT: read + write ------------------------------
+            if self.driver_name == "tcp_json" and hasattr(self.driver, "sync"):
+                raw, failed = self.driver.sync(self._read_addrs, writes_to_send)
+            else:
+                raw = self.driver.read(self._read_addrs)
+                failed = self.driver.write(writes_to_send) if writes_to_send else []
+
             t_rd = time.monotonic_ns()
             vals = {n: self._get(n, raw) for n in self.read_names}
             read_ms = (t_rd - t_rs) / 1e6
@@ -761,67 +886,36 @@ class PlcRosBridge(Node):
                 self._last_pub.clear()
                 self._watchdog_fired = False
 
+            # ---- 4. Handle write result -----------------------------------
+            if writes_to_send:
+                if not failed:
+                    if act_written and probe_tag:
+                        if (t_rd - probe_recv) <= PROBE_MAX_AGE_NS:
+                            hb_val = (
+                                vals.get(self.hb_counter)
+                                if self.hb_counter else None
+                            )
+                            self._probe.record(
+                                probe_tag, probe_recv, t_rd,
+                                int(hb_val) if hb_val is not None else 0,
+                            )
+                    if ack_to_send is not None:
+                        self._last_ack = ack_to_send
+                else:
+                    for a in failed:
+                        self.log.warning(
+                            "write_failed",
+                            extra={"tick_id": tick_id, "addr": a},
+                        )
+
             self._publish(vals, t_rs, t_rd)
 
-            writes = {}
-            pending_ack = None
-            probe_tag, probe_recv, act_written = "", 0, False
-
+            # ---- 5. Prepare hb_ack for NEXT tick (pipelined) --------------
             if self.hb_counter and self.hb_ack:
                 hb = vals.get(self.hb_counter)
                 if hb is not None and hb != self._last_ack:
-                    writes[self.sig[self.hb_ack]["addr"]] = int(hb)
-                    pending_ack = int(hb)
-
-            with self._js_lock:
-                js_fresh = (
-                    self._js_ok
-                    and self._last_js_t > 0
-                    and (time.monotonic() - self._last_js_t) <= JS_STALE_AGE_S
-                )
-                if self.act_ang and js_fresh:
-                    act_written = True
-                    probe_tag, probe_recv = self._js_tag, self._js_recv_ns
-                    self._js_tag = ""      # each tag is recorded at most once
-                    if len(self.act_ang) == 1:
-                        sig = self.act_ang[0]
-                        addr = self.sig[sig]["addr"]
-                        writes[addr] = [
-                            math.degrees(float(x)) for x in self._js_rad
-                        ]
-                    else:
-                        for sig, rad in zip(self.act_ang, self._js_rad):
-                            writes[self.sig[sig]["addr"]] = math.degrees(
-                                float(rad)
-                            )
-                    if self.cmd_ack:
-                        writes[self.sig[self.cmd_ack]["addr"]] = True
-                    if self.feedback_valid:
-                        writes[self.sig[self.feedback_valid]["addr"]] = True
-                elif self.act_ang and not js_fresh:
-                    if self.cmd_ack:
-                        writes[self.sig[self.cmd_ack]["addr"]] = False
-                    if self.feedback_valid:
-                        writes[self.sig[self.feedback_valid]["addr"]] = False
-
-            if writes:
-                failed = self.driver.write(writes)
-                if (self._probe is not None and act_written and probe_tag
-                        and not failed):
-                    write_done_ns = time.monotonic_ns()
-                    if write_done_ns - probe_recv <= PROBE_MAX_AGE_NS:
-                        self._probe.record(
-                            probe_tag, probe_recv, write_done_ns)
-                for a in failed:
-                    self.log.warning(
-                        "write_failed",
-                        extra={"tick_id": tick_id, "addr": a},
-                    )
-                if (
-                    pending_ack is not None
-                    and self.sig[self.hb_ack]["addr"] not in failed
-                ):
-                    self._last_ack = pending_ack
+                    self._pending_writes[self.sig[self.hb_ack]["addr"]] = int(hb)
+                    self._pending_ack = int(hb)
 
             self._tick_count += 1
             if self._tick_count % self._stats_every == 0:
@@ -846,7 +940,6 @@ class PlcRosBridge(Node):
                 self._slow_sock_sum_ms = 0.0
                 self._slow_gap_sum_ms = 0.0
 
-            # ← FIX: يُسجَّل في نهاية الدورة، ليصبح origin_ns للدورة التالية
             self._last_tick_end_ns = time.monotonic_ns()
 
         except Exception as e:
@@ -901,8 +994,8 @@ class PlcRosBridge(Node):
             js.name = list(self.joints)
             js.position = ang
             if self._probe is not None and t_rs is not None:
-                # ← FIX: origin_ns = نهاية الدورة السابقة (queue delay الحقيقي)
-                origin_ns = self._last_tick_end_ns if self._last_tick_end_ns is not None else t_rs
+                origin_ns = (self._last_tick_end_ns
+                             if self._last_tick_end_ns is not None else t_rs)
                 js.header.frame_id = (
                     f"p;{origin_ns};{t_rs};{t_rd};{time.monotonic_ns()}")
                 self._probe_sent += 1
@@ -912,9 +1005,16 @@ class PlcRosBridge(Node):
         p = self._probe
         if p is None:
             return {}
-        return {"probe_sent": self._probe_sent, "probe_rows": p.rows,
-                "probe_rejected": p.rejected,
-                "probe_order_violations": p.order_violations}
+        # v3.7: expose both bridge-authored tags (probe_sent) and all
+        # record() attempts (probe_attempted) so tests can distinguish
+        # "bridge didn't publish" from "tag arrived but was rejected".
+        return {
+            "probe_sent": self._probe_sent,
+            "probe_attempted": p.attempted,
+            "probe_rows": p.rows,
+            "probe_rejected": p.rejected,
+            "probe_order_violations": p.order_violations,
+        }
 
     def _measured_rate_hz(self):
         now = time.monotonic()

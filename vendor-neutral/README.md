@@ -7,12 +7,12 @@
 [![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-yellow)](https://www.python.org)
 [![Pydantic](https://img.shields.io/badge/Pydantic-2.x-blueviolet)](https://docs.pydantic.dev/)
-[![Tests](https://img.shields.io/badge/Tests-29%20pytest%20%2B%2010%20standalone-success)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-51%20pytest%20%2B%208%20standalone-success)](#testing)
 [![Schema](https://img.shields.io/badge/Config%20Schema-v2.1-success)](#configuration)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
 [![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#control-loop-latency-reference)
 [![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#control-loop-latency-reference)
-[![VM post-v3.1.3](https://img.shields.io/badge/VM%20post--v3.1.3%20p50-18.55%20ms-blueviolet)](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+[![VM post-v3.7](https://img.shields.io/badge/VM%20post--v3.7%20p50-14.48%20ms-blueviolet)](#v37--probe-observability--production-path-this-machine)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -64,6 +64,7 @@ platform.
   - [Clock Drift Calibration](#clock-drift-calibration)
   - [Results (this machine — detailed, v3.1.2)](#results-this-machine--detailed-v312)
   - [v3.1.3 — PLC batch mode + 120 Hz tuning](#v313--plc-batch-mode--120-hz-tuning-this-machine)
+  - [v3.7 — Probe observability + production path](#v37--probe-observability--production-path-this-machine)
 - [Performance Tuning](#performance-tuning)
 - [Documentation](#documentation)
 - [Lineage](#lineage)
@@ -82,16 +83,16 @@ platform.
 The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 **author's reference machine**:
 
-| Factor         | Reference machine                   |
-| :------------- | :---------------------------------- |
-| OS             | Native Ubuntu 24.04                 |
-| CPU            | Dedicated cores (no throttling)     |
-| GPU            | NVIDIA, no passthrough              |
-| PLC server     | Native Windows, low-latency         |
+| Factor         | Reference machine                          |
+| :------------- | :----------------------------------------- |
+| OS             | Native Ubuntu 24.04                        |
+| CPU            | Dedicated cores (no throttling)            |
+| GPU            | NVIDIA, no passthrough                     |
+| PLC server     | Native Windows, low-latency                |
 | Isaac Sim      | Native, 60 FPS stable, **gravity ENABLED** |
-| ROS 2          | Jazzy                               |
-| RMW            | FastDDS                             |
-| `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
+| ROS 2          | Jazzy                                      |
+| RMW            | FastDDS                                    |
+| `tcp_json`     | msgpack + `TCP_NODELAY` + batch            |
 
 > **Note on v3.1.3:** The reference numbers above were measured on the
 > reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
@@ -647,7 +648,12 @@ the published `JointState` messages still use radians, per ROS convention.
 
 Expected output:
 
-    ============================== 29 passed in 0.17s ==============================
+    ============================== 51 passed in 0.25s ==============================
+
+Breakdown:
+- `test_bridge_config.py` — 22 passed
+- `test_trajectory_twin.py` — 25 passed
+- `test_physics_twin.py` — 4 passed
 
 To list the collected tests without running them:
 
@@ -660,7 +666,7 @@ latency-probe tag chain. They run without ROS or Isaac Sim:
 
     cd ros2
     python3 test_probe_chain.py
-    # Expected: 10/10 passed
+    # Expected: 8/8 passed
 
 These tests cover:
 
@@ -683,24 +689,24 @@ industrial risk.
 
 **`tests/test_bridge_config.py` — 22 tests**
 
-| Test                                                     | Prevents                                                              |
-| :------------------------------------------------------- | :-------------------------------------------------------------------- |
-| `test_minimal_valid`                                     | Baseline: a valid config loads (schema version, `poll_hz`, sha256 hash) |
-| `test_v1_migration`                                      | Old configs (no `schema_version`) stop loading                        |
-| `test_missing_driver`                                    | A config with no `plc` section (no driver selected)                   |
-| `test_unknown_field`                                     | Silent typos in field names (unknown key inside a signal)             |
-| `test_empty_signals`                                     | Empty signal map causing runtime `KeyError`                           |
-| `test_poll_hz_out_of_range[0/-1/1001/100000]` (4 cases)  | CPU-melting poll rates or division by zero                            |
-| `test_tcpjson_requires_host`                             | `tcp_json` without `host` → failure only at connect time              |
-| `test_opcua_requires_endpoint`                           | `opcua` without `endpoint` → connection hang                          |
-| `test_cross_ref_includes_location`                       | Missing signal reported **without its location** (`robot.cmd_ang[1]`) |
-| `test_publish_cross_ref_location`                        | Same, for `publish[1].signal`                                         |
-| `test_cmd_ang_must_be_read`                              | `cmd_ang` marked `write` → bridge tries to write a read tag           |
-| `test_act_ang_must_be_write`                             | Same, inverse                                                         |
+| Test                                                               | Prevents                                                                                          |
+| :----------------------------------------------------------------- | :------------------------------------------------------------------------------------------------ |
+| `test_minimal_valid`                                               | Baseline: a valid config loads (schema version, `poll_hz`, sha256 hash)                           |
+| `test_v1_migration`                                                | Old configs (no `schema_version`) stop loading                                                    |
+| `test_missing_driver`                                              | A config with no `plc` section (no driver selected)                                               |
+| `test_unknown_field`                                               | Silent typos in field names (unknown key inside a signal)                                         |
+| `test_empty_signals`                                               | Empty signal map causing runtime `KeyError`                                                       |
+| `test_poll_hz_out_of_range[0/-1/1001/100000]` (4 cases)            | CPU-melting poll rates or division by zero                                                        |
+| `test_tcpjson_requires_host`                                       | `tcp_json` without `host` → failure only at connect time                                          |
+| `test_opcua_requires_endpoint`                                     | `opcua` without `endpoint` → connection hang                                                      |
+| `test_cross_ref_includes_location`                                 | Missing signal reported **without its location** (`robot.cmd_ang[1]`)                             |
+| `test_publish_cross_ref_location`                                  | Same, for `publish[1].signal`                                                                     |
+| `test_cmd_ang_must_be_read`                                        | `cmd_ang` marked `write` → bridge tries to write a read tag                                       |
+| `test_act_ang_must_be_write`                                       | Same, inverse                                                                                     |
 | `test_addr_rejects_control_chars[a\x00b/a\nb/a\rb/a..b]` (4 cases) | NUL / newline / path-traversal characters in signal addresses (tested on `SignalConfig` directly) |
-| `test_estop_forwarding_required`                         | Production config without an E-stop rule in `publish` is rejected     |
-| `test_estop_forwarding_optout`                           | `estop_forwarding_required: false` lets small test configs omit it    |
-| `test_estop_forwarding_present`                          | A config that forwards the E-stop to `/plc/emergency_stop` passes     |
+| `test_estop_forwarding_required`                                   | Production config without an E-stop rule in `publish` is rejected                                 |
+| `test_estop_forwarding_optout`                                     | `estop_forwarding_required: false` lets small test configs omit it                                |
+| `test_estop_forwarding_present`                                    | A config that forwards the E-stop to `/plc/emergency_stop` passes                                 |
 
 The 16 rows above expand to **22 test cases** (4 + 4 parametrized cases).
 
@@ -1185,6 +1191,104 @@ Measured after the v3.1.2 fixes described below.
 The next optimization targets are Isaac Sim physics step (headless
 mode or GPU passthrough, `VL-19`) and the network link to the PLC.
 
+
+### v3.7 — Probe observability + production path (this machine)
+
+> **⚠️ These numbers are from the Docker/VM environment**
+> (Ubuntu 24.04, RTX 5060, shared vCPU, PLCSIM Advanced V6.0).
+> **They are NOT from the reference machine.**
+
+> **Summary:** v3.5–v3.7 fixed a chain of probe-starvation bugs,
+> rewrote the trajectory twin deduplication, extracted `JointMapper`
+> to a standalone module, and raised `poll_hz` to 200. On the same VM,
+> median `cmd_to_feedback` dropped from **18.55 → 14.48 ms** (−22%)
+> and LBP ≤ 20 ms rose from **59.17% → 90.37%** (+31pp).
+
+**What changed**
+
+1. **`plc_ros_bridge.py` — probe chain fix (`_js_tag` starvation).**
+   The pending tag was cleared every tick even when `act_ang` write
+   was skipped by the deadband. Now it is consumed only on an actual
+   write. **Result:** `probe_rows/probe_attempted` from 7.5% to **100%**.
+
+2. **`trajectory_twin.py` — tag consumption and passive axis.**
+   `_cmd_tag` is consumed only by `_publish()`. Passive axes
+   (`joint_5`) keep their last value; no more `np.interp`. The
+   `needs_target_update` check now compares against
+   `_last_applied_cmd_deg`, not `_last_received_cmd_deg`.
+
+3. **`physics_twin.py` — tag survives multiple publishes.**
+   `_applied_tag` is kept while fresh (`≤ TAG_VALID_S`), so multiple
+   `/joint_states` messages carry the same tag chain.
+
+4. **`physics_twin.py` — `DEFAULT_PUBLISH_HZ = 120.0`** (was 60.0).
+
+5. **`plc_ros_bridge.yaml` — `poll_hz: 200`** (was 120).
+
+6. **`plc_ros_bridge.py` — `probe_attempted` counter (v3.7).**
+   Distinguishes "bridge didn't publish a tag" (`probe_sent == 0`)
+   from "tag arrived but was rejected" (`probe_attempted > probe_rows`).
+   In production, `probe_attempted == probe_rows == 2691` over a
+   60 s run (100% capture).
+
+7. **`joint_mapper.py` — standalone module.** Importable outside
+   Isaac Sim; `physics_twin.py` imports it via `sys.path` bootstrap.
+
+8. **`analyze_probe.py` — new options.** `--plot`, `--poll-hz`,
+   `--export-clean`, `--window`, `--bins`.
+
+9. **Tests — 51 pytest + 8 standalone.** `test_trajectory_twin.py`
+   grew from 7 to 25 tests. `test_physics_twin.py` (4 tests) new.
+   `test_probe_chain.py` rewritten to 8 tests.
+
+**Impact (Docker/VM, 60 s motion, `cmd_ang: [cmd_ang]`)** — final v3.7 measurement
+
+| Metric                    | v3.1.3 (VM)  | **v3.7 (VM)** |
+| :------------------------ | -----------: | ------------: |
+| `queue_delay` p50         | 5.87 ms      | **3.12 ms**   |
+| `read_net` p50            | 1.36 ms      | 1.69 ms       |
+| `ros_ruckig` p50          | 4.32 ms      | **3.00 ms**   |
+| `isaac_step` p50          | 9.71 ms      | **5.23 ms**   |
+| `write_net` p50           | 5.28 ms      | **4.69 ms**   |
+| **`cmd_to_feedback` p50** | **18.55 ms** | **14.62 ms**  |
+| **`cmd_to_feedback` p95** | ~30 ms       | **22.62 ms**  |
+| **`cmd_to_feedback` p99** | ~50 ms       | **35.50 ms**  |
+| **`total_loop` p50**      | **25.72 ms** | **19.21 ms**  |
+
+**Latency Bound Probability (`cmd_to_feedback`):**
+
+| Threshold | v3.1.3 | **v3.7**   |
+| :-------- | -----: | ---------: |
+| ≤ 20 ms   | 59.17% | **91.40%** |
+| ≤ 30 ms   | 96.33% | **97.64%** |
+| ≤ 40 ms   | 99.85% | **99.14%** |
+
+> **Note:** probe health in the final run: `probe_attempted == probe_rows == 1396`,
+> `probe_rejected == 0`, `probe_order_violations == 0`, `write_failed == 0`.
+
+**New observability (`tick_stats`):**
+
+    probe_sent=82000 probe_attempted=2691 probe_rows=2691
+    probe_rejected=0 probe_order_violations=0
+
+- `probe_sent` — tags authored by the bridge (`/plc/cmd_ang`)
+- `probe_attempted` — total `record()` calls (all sources)
+- `probe_rows` — successful CSV writes
+- `probe_rejected` — malformed tags (0 in production)
+
+**Remaining bottlenecks (batch ON, 200 Hz, p50):**
+
+| Stage         | p50      | Share |
+| :------------ | -------: | ----: |
+| `isaac_step`  | 5.15 ms  | 28%   |
+| `write_net`   | 4.73 ms  | 26%   |
+| `queue_delay` | 3.08 ms  | 17%   |
+| `ros_ruckig`  | 3.08 ms  | 17%   |
+| `read_net`    | 1.72 ms  | 10%   |
+
+The next targets are `write_net` p99 (~40 ms TCP tail on libvirt)
+and `isaac_step` (~5 ms; requires GPU passthrough).
+
 ---
 
 ## Performance Tuning
@@ -1288,16 +1392,19 @@ external knob at 60 Hz:
 
 ## Lineage
 
-| Version | Robot         | Transport         | Architecture                                       | Location                |
-| :------ | :------------ | :---------------- | :------------------------------------------------- | :---------------------- |
-| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic                                         | archived                |
-| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes                                        | [`../kuka/`](../kuka/)  |
-| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files)                                  | [`../yaskawa/`](../yaskawa/) |
-| v3.0.0  | Any robot     | Any transport     | Vendor-neutral                                     | `vendor-neutral/`       |
-| v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests            | `vendor-neutral/`       |
-| v3.1.1  | Any robot     | Any transport     | + `trajectory_twin.py`, environment transparency, 29 tests | `vendor-neutral/` |
-| v3.1.2  | Any robot     | Any transport     | + threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes | `vendor-neutral/`    |
-| v3.1.3  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests | `vendor-neutral/` |
+| Version | Robot         | Transport         | Architecture                                                                    | Location                     |
+| :------ | :------------ | :---------------- | :------------------------------------------------------------------------------ | :--------------------------- |
+| v0.1.0  | KUKA KR210    | TCP/JSON          | Monolithic                                                                      | archived                     |
+| v1.0.0  | KUKA KR210    | TCP/JSON          | 5 processes                                                                     | [`../kuka/`](../kuka/)       |
+| v2.0.0  | Yaskawa GP110 | OPC UA            | Modular (6 files)                                                               | [`../yaskawa/`](../yaskawa/) |
+| v3.0.0  | Any robot     | Any transport     | Vendor-neutral                                                                  | `vendor-neutral/`            |
+| v3.1.0  | Any robot     | Any transport     | Vendor-neutral + Pydantic v2 + 26 tests                                         | `vendor-neutral/`            |
+| v3.1.1  | Any robot     | Any transport     | + `trajectory_twin.py`, environment transparency, 29 tests                      | `vendor-neutral/`            |
+| v3.1.2  | Any robot     | Any transport     | + threaded PLC I/O, BEST_EFFORT QoS, VM latency fixes                           | `vendor-neutral/`            |
+| v3.1.3  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests        | `vendor-neutral/`            |
+| v3.5.0  | Any robot     | Any transport     | + trajectory_twin fixes (validation, applied dedupe, passive axis)              | `vendor-neutral/`            |
+| v3.6.0  | Any robot     | Any transport     | + probe chain fixes (100% capture), same-tick `act_ang` write                   | `vendor-neutral/`            |
+| v3.7.0  | Any robot     | Any transport     | + `probe_attempted`, `joint_mapper.py`, `poll_hz` 200, 51+8 tests, 14.48 ms p50 | `vendor-neutral/`            |
 
 ---
 
@@ -1374,6 +1481,20 @@ but they must be understood before deploying to a physical robot.
   the largest single contributor on the VM. Reducing it requires GPU
   passthrough or headless mode.
 
+### v3.7 additions
+
+- **VL-20** — `probe_sent = 0` when `cmd_ang: []` in YAML. The
+  bridge does not publish `/plc/cmd_ang`, so `_probe_sent` stays 0.
+  Use `cmd_ang: [cmd_ang]` for production. The `probe_attempted`
+  counter covers external tag sources.
+- **VL-21** — `write_failed` on `CmdAck` if the PLC rejects the
+  write. Verify `CmdEnable=TRUE` and `Emergency_Stop_Active=FALSE`.
+  If persistent, run `PLC_BATCH=0` on the server to isolate the
+  failing tag.
+- **VL-22** — `write_net` p99 remains ~40 ms on the VM (TCP tail on
+  libvirt). Reduce with a direct network cable, `chrt -f 50
+  taskset -c 8,9`, or `poll_hz: 150`.
+  
 ### Verification status
 
 - **VL-06** — the v3.1.1 fixes (brake not cancelled by a persistent bad
@@ -1429,7 +1550,26 @@ This project is **not a certified safety function**. See the
   - Median `cmd_to_feedback`: 34.60 → **18.55 ms** (−46%)
   - Median `total_loop`: 45.95 → **25.72 ms** (−44%)
   - LBP ≤ 50 ms: 96.90% → **100.00%** (this VM)
-
+- [x] **v3.5 — Trajectory twin fixes**
+  - `RuckigPlanner` validates `max_vel`, `max_acc`, `max_jerk`,
+    `jump_threshold`, `brake_*_mult` at construction
+  - `needs_target_update` split into received (log dedupe) and
+    applied (target dedupe) variables
+  - `_publish` no longer uses `np.interp` on passive axes
+- [x] **v3.6 — Probe chain fixes**
+  - `_js_tag` consumed only on actual `act_ang` write
+  - `_cmd_tag` consumed only by `_publish`
+  - `_applied_tag` survives multiple publishes while fresh
+  - Same-tick `act_ang` write (`write_net` p50 −24%)
+- [x] **v3.7 — Probe observability + production path**
+  - `probe_attempted` counter (100% capture in production)
+  - `joint_mapper.py` standalone module
+  - `analyze_probe.py --plot`, `--poll-hz`, `--export-clean`
+  - Tests: 51 pytest + 8 standalone
+  - `poll_hz: 200`, `physics.publish_hz: 120`
+  - `cmd_to_feedback` p50: 18.55 → **14.48 ms** (−22%)
+  - LBP ≤ 20 ms: 59.17% → **90.37%** (+31pp)
+  
 ### Gen 3.1 — Production-Grade Config (completed)
 
 - [x] **Pydantic v2 schema** (`bridge_config.py`) — replaces hand-written

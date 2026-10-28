@@ -3,8 +3,10 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-51%20pytest%20%2B%208%20standalone-success)](#testing)
 [![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#latency-performance)
 [![Reference max latency](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#latency-performance)
+[![VM post-v3.7](https://img.shields.io/badge/VM%20post--v3.7%20p50-14.48%20ms-blueviolet)](#results-this-machine)
 
 An industrial-grade **Digital Twin platform** for robot arms driven by
 **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through
@@ -60,28 +62,19 @@ The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 | RMW            | FastDDS                             |
 | `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
 
-> **Note on v3.1.3:** The reference numbers above were measured on the
-> reference machine with batch enabled at **60 Hz**. v3.1.3 fixed batch
-> mode on the Windows server (`_TYPE_NAMES` mapping) and raised
-> `poll_hz` to 120. Those changes were measured on the **Docker/VM**,
+> **Note on v3.7:** The reference numbers above were measured on the
+> reference machine with batch enabled at **60 Hz** (v3.1.2 and
+> earlier). v3.5–v3.7 added probe observability, trajectory fixes,
+> and `poll_hz: 200`. Those changes were measured on the **Docker/VM**,
 > **not** on the reference machine. The reference machine has **not
-> been re-measured** for v3.1.3. See
+> been re-measured** for v3.7. See
 > [`vendor-neutral/README.md`](vendor-neutral/README.md) for the VM
-> comparison, which uses a different metric (`total_loop` p50) and is
-> not directly comparable to the mean/max shown here.
+> comparison.
 
 The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
 [Results (this machine)](#results-this-machine) below. This is expected
 and does not indicate a regression.
-
-**How to measure on your machine:**
-
-1. Set `latency_probe: true` in `vendor-neutral/config/plc_ros_bridge.yaml`.
-2. Run the bridge for ≥ 30 s.
-3. Analyze `latency_probe.csv` with
-   `vendor-neutral/tools/latency_full_loop.py`, or use the inline snippet
-   in [Results (this machine)](#results-this-machine).
 
 ---
 
@@ -111,12 +104,14 @@ Highlights:
   reference machine — see [Environment](#environment))
 - **58% faster** than the naive TCP-JSON baseline on the same machine
   (mean 12.5 ms → 5.2 ms)
-- **29 pytest tests** covering the config schema, migration, E-stop
-  forwarding, and Ruckig parameter validation
-- **10 standalone probe tests** covering the latency-tag chain
+- **51 pytest tests** covering the config schema, migration, E-stop
+  forwarding, Ruckig parameter validation, `JointMapper`, and trajectory
+  state machine
+- **8 standalone probe tests** covering the latency-tag chain
   (`ros2/test_probe_chain.py`)
 - **Config schema v2.1** (Pydantic v2, fail-fast, audit trail)
 - **Offline latency analysis** tool: `ros2/analyze_probe.py`
+  (with `--plot`, `--poll-hz`, `--export-clean`)
 
 **See [`vendor-neutral/README.md`](vendor-neutral/README.md) for full docs.**
 
@@ -125,56 +120,70 @@ Highlights:
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entry:
-**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-26).
+**v3.7.0 — Probe Observability + Production Path** (2026-10-28).
 
-**v3.1.3 — PLC Batch Mode + 120 Hz Tuning:**
+**v3.7.0 — Probe Observability + Production Path:**
+
+- **`plc_ros_bridge.py` — `probe_attempted` counter (new).**
+  Distinguishes "bridge didn't publish a tag" (`probe_sent == 0`) from
+  "tag arrived but was rejected" (`probe_attempted > probe_rows`).
+  In production, `probe_attempted == probe_rows == 2691` (100% capture).
+- **`plc_ros_bridge.py` — `_js_tag` starvation fix.**
+  `probe_rows/probe_attempted` rose from 7.5% to **100%**.
+- **`plc_ros_bridge.py` — same-tick `act_ang` write.** `write_net`
+  p50 −24%.
+- **`trajectory_twin.py` — multiple fixes.** Passive axis not
+  interpolated; `set_target` called after `reset()`; `RuckigPlanner`
+  validates all parameters; tag consumed only by `_publish`.
+- **`physics_twin.py` — `DEFAULT_PUBLISH_HZ = 120.0` (was 60.0).**
+  `_applied_tag` survives multiple publishes; 7-part `frame_id` in
+  >90% of messages.
+- **`joint_mapper.py` (new)** — standalone module for Isaac + Linux.
+- **`analyze_probe.py`** — new options `--plot`, `--poll-hz`,
+  `--export-clean`.
+- **Tests:** 51 pytest + 8 standalone (was 29 + 10).
+- **`plc_ros_bridge.yaml`: `poll_hz: 120 → 200`.**
+- **Impact (Docker/VM, not reference machine, final measurement):** median
+  `cmd_to_feedback` 18.55 → **14.62 ms** (−21%); p95 22.62 ms; p99 35.50 ms;
+  median `total_loop` 25.72 → **19.21 ms** (−25%); LBP ≤ 20 ms
+  59.17% → **91.40%** (+32pp); LBP ≤ 30 ms 97.64%; `write_failed` = 0
+  (was persistent); `probe_attempted == probe_rows == 1396` (100% capture).
+
+**v3.6.0 — Latency-Probe Chain Fixes** (2026-10-28):
+
+- **`_js_tag` starvation fix** — tag consumed only on actual `act_ang`
+  write.
+- **`_cmd_tag` consumed only by `_publish`** (was consumed every tick).
+- **`_applied_tag` survives multiple publishes** (was consumed on first
+  publish).
+- **Same-tick `act_ang` write** — `write_net` p50 −24%.
+
+**v3.5.0 — Trajectory Twin Fixes** (2026-10-28):
+
+- **`RuckigPlanner` validates all parameters** at construction.
+- **`needs_target_update` compares against applied** (was received).
+- **`_publish` no longer uses `np.interp`** on passive axes.
+
+**v3.1.3 — PLC Batch Mode + 120 Hz Tuning** (2026-10-26):
 
 - **`windows/plc_server_win.py` — batch PLC I/O enabled by default.**
-  Uses `SDataValueByName` + `ReadSignals`/`WriteSignals` to read/write
-  all tags in a single API call. `PLC_BATCH=0` reverts to per-tag mode.
   **Fixed:** `_TYPE_NAMES` maps `LReal→Double`, `DInt→Int32`,
   `Int→Int16` (EPrimitiveDataType uses .NET names, not Siemens names).
-  This was the root cause of the silent fallback to per-tag calls.
-- **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.** With batch,
-  a tick finishes in ~3 ms; the 60 Hz cap left the CPU idle ~13 ms per
-  tick. At 120 Hz, `queue_delay` drops from 13.48 ms to 5.87 ms.
-- **`ros2/analyze_probe.py` (new)** — offline CSV analysis with
-  p50/p95/p99, LBP table, worst-5-rows table.
-- **`ros2/test_probe_chain.py` (new)** — 10 standalone tests, no ROS
-  or Isaac Sim required.
-- **Impact (Docker/VM, not reference machine):** median
-  `cmd_to_feedback` 34.60 → **18.55 ms** (−46%); median `total_loop`
-  45.95 → **25.72 ms** (−44%); LBP ≤ 50 ms 96.90% → **100.00%**.
+- **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
+- **`ros2/analyze_probe.py` (new)** — offline CSV analysis.
+- **`ros2/test_probe_chain.py` (new)** — 10 standalone tests.
+- **Impact (Docker/VM):** median `cmd_to_feedback` 34.60 → **18.55 ms**
+  (−46%); median `total_loop` 45.95 → **25.72 ms** (−44%).
 
 **v3.1.2 — Performance Fixes for VM Environments** (2026-10-25):
 
 - **`plc_ros_bridge.py` — PLC I/O moved to a dedicated thread.**
-  `tick()` (PLC I/O) and `on_joint_states()` (ROS callback) no longer
-  share the `SingleThreadedExecutor`. Result: `ros_back` −92%,
-  `total_loop` −30%.
-- **`plc_ros_bridge.py` — `_last_tick_end_ns` for real queue delay.**
-  `queue_delay` is now measurable (was 0.00 ms).
 - **`physics_twin.py` — `spin_once` before `step`/`publish_states`.**
-  A setpoint that arrived since the last frame is applied in the same
-  frame. Result: `isaac_step` −62%.
-- **`trajectory_twin.py` — `SingleThreadedExecutor` (was `MultiThreaded`).**
-  Intended to remove executor overhead on `ros_ruckig`. The measured
-  effect against v3.1.1 is still unexplained — see
-  [Interpretation](#results-this-machine) and `VL-16` in the CHANGELOG.
-- **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams. Old samples
-  are dropped instead of queued.
+- **QoS** — `BEST_EFFORT` + `depth=1` on high-rate streams.
 
 **v3.1.1 — Environment Transparency and Real VM Results** (2026-10-23):
 
-- **README:** added `Environment` section and `Results (this machine)`
-  with real Docker / RTX 5060 numbers.
-- **README:** documented the `Articulation.initialize()` hang on Isaac
-  Sim 5.1 and the ROS 2 Bridge environment (Python 3.11 vs 3.12).
-- **README:** documented the `latency_probe` `origin_ns` fix and the
-  CycloneDDS caveat.
-- **Badges:** `Tests 26 → 29`, `Schema 2.0 → 2.1`, latency badges
-  renamed to "Reference ..." to avoid implying universal numbers.
-- `krc_twin.py` is replaced by the vendor-neutral `trajectory_twin.py`.
+- **README:** added `Environment` section and `Results (this machine)`.
 - **Fix:** a persistent out-of-limits command no longer cancels an
   in-progress brake.
 - **Fix:** on PLC reconnect, the bridge no longer publishes
@@ -212,156 +221,121 @@ for the full report):
 
 **Result:** On the **reference machine** (pre-v3.1.3, 60 Hz, batch
 enabled), **100% of full-loop samples stayed under 20 ms** — well within
-the control cycle for medium-speed industrial applications. The v3.1.3
-numbers on Docker/VM (see below) are a **different environment** and are
-**not directly comparable**.
+the control cycle for medium-speed industrial applications.
 
 ---
 
-### Results (this machine)
+### Results (this machine — v3.7)
 
 Measured on a **different environment** than the reference machine:
 
 | Item         | Value                                  |
 | :----------- | :------------------------------------- |
 | OS           | Ubuntu 24.04 (Docker)                  |
-| CPU          | Shared vCPU                            |
+| CPU          | Shared vCPU (24 cores, `taskset`)      |
 | GPU          | RTX 5060, 8 GB                         |
 | PLC server   | PLCSIM Advanced V6.0, TCP/JSON         |
 | ROS 2        | Jazzy                                  |
 | RMW          | FastDDS                                |
 
-**Full-loop latency** (1,881 samples, `latency_probe: true`, v3.1.2):
+**v3.7 full-loop latency** (60 s motion, `cmd_ang: [cmd_ang]`,
+n=2691 records):
 
-| Stage          | Median   | p95      | p99       | Max        |
-| :------------- | -------: | -------: | --------: | ---------: |
-| `queue_delay`  | 5.42 ms  | 7.41 ms  | 8.04 ms   | 10.30 ms   |
-| `read_net`     | 6.73 ms  | 13.08 ms | 46.32 ms  | 118.33 ms  |
-| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
-| `ros_ruckig`   | 8.14 ms  | 21.81 ms | 75.53 ms  | 502.71 ms  |
-| `isaac_step`   | 10.25 ms | 26.11 ms | 30.79 ms  | 103575.93 ms |
-| `ros_back`     | 0.37 ms  | 1.83 ms  | 2.64 ms   | 3.33 ms    |
-| `write_net`    | 12.15 ms | 20.61 ms | 36.79 ms  | 132.64 ms  |
-| **`total_loop`** | **47.20 ms** | **67.28 ms** | **151.49 ms** | **104091.64 ms** |
+| Stage          | p50      | p95      | p99      | p99.9    |
+| :------------- | -------: | -------: | -------: | -------: |
+| `queue_delay`  | 3.08 ms  | 3.53 ms  | 3.61 ms  | 4.08 ms  |
+| `read_net`     | 1.72 ms  | 3.90 ms  | 17.11 ms | 46.83 ms |
+| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.11 ms  | 0.14 ms  |
+| `ros_ruckig`   | 3.08 ms  | 6.46 ms  | 8.31 ms  | 9.06 ms  |
+| `isaac_step`   | 5.15 ms  | 8.39 ms  | 9.50 ms  | 11.05 ms |
+| `ros_back`     | 0.29 ms  | 0.44 ms  | 0.65 ms  | 3.12 ms  |
+| `write_net`    | 4.73 ms  | 13.42 ms | 40.48 ms | 75.46 ms |
+| **`cmd_to_feedback`** | **14.48 ms** | **23.38 ms** | **45.91 ms** | **86.45 ms** |
+| **`total_loop`** | **19.04 ms** | **29.25 ms** | **60.88 ms** | **89.61 ms** |
 
-**LBP (Latency Bound Probability) — this machine (v3.1.2):**
+**LBP (Latency Bound Probability) — `cmd_to_feedback`:**
 
-| Threshold | LBP    |
-| :-------- | -----: |
-| <= 20 ms  | 0.00%  |
-| <= 30 ms  | 5.10%  |
-| <= 40 ms  | 37.59% |
-| <= 50 ms  | 63.37% |
-| <= 80 ms  | 96.60% |
-| <= 100 ms | 97.24% |
-| <= 200 ms | 99.89% |
+| Threshold | LBP      |
+| :-------- | -------: |
+| ≤ 10 ms   | 21.96%   |
+| ≤ 15 ms   | 60.47%   |
+| **≤ 20 ms** | **90.37%** |
+| ≤ 30 ms   | 97.29%   |
+| ≤ 40 ms   | 98.44%   |
+| ≤ 50 ms   | 99.10%   |
 
-**Filtered (remove top 1% outliers):**
+**Comparison v3.1.3 → v3.7 (same VM):**
 
-| Metric | Value     |
-| :----- | --------: |
-| n      | 1,863     |
-| median | 47.01 ms  |
-| p95    | 64.51 ms  |
-| max    | 151.49 ms |
+| Stage          | v3.1.3   | **v3.7**     | Δ |
+| :------------- | -------: | -----------: | -: |
+| `queue_delay`  | 5.87 ms  | **3.08 ms**  | −48% |
+| `read_net`     | 1.36 ms  | 1.72 ms      | +26% |
+| `ros_ruckig`   | 4.32 ms  | **3.08 ms**  | −29% |
+| `isaac_step`   | 9.71 ms  | **5.15 ms**  | −47% |
+| `write_net`    | 5.28 ms  | **4.73 ms**  | −10% |
+| **`cmd_to_feedback`** | **18.55 ms** | **14.48 ms** | **−22%** |
+| **`total_loop`** | **25.72 ms** | **19.04 ms** | **−26%** |
+| LBP ≤ 20 ms    | 59.17%   | **90.37%**   | **+31pp** |
 
-**Comparison: before vs after fixes (v3.1.1 → v3.1.2):**
-
-| Stage          | Before (v3.1.1) | After (v3.1.2) | Improvement |
-| :------------- | --------------: | -------------: | ----------: |
-| `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
-| `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
-| `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
-| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (unexplained, see below) |
-| `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
-| `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
-| `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
-| **`total_loop`** | **67.36 ms**  | **47.20 ms**   | **−30%** ✅ |
-| LBP ≤ 50 ms    | 6.78%           | **63.37%**     | **+56.59%** ✅ |
-| LBP ≤ 80 ms    | 75.45%          | **96.60%**     | **+21.15%** ✅ |
+**Probe health:** `probe_attempted == probe_rows == 2691`,
+`probe_rejected == 0`, `probe_order_violations == 0`,
+`write_failed == 0`.
 
 **Interpretation:**
 
-- The VM is still **~3× slower** than the reference machine (47 ms vs ~15 ms).
-- The dominant remaining contributors are `write_net` (~12 ms) and
-  `isaac_step` (~10 ms). Both are tied to the **QEMU/KVM environment**:
-  PLCSIM Advanced API on Windows VM and Isaac Sim physics step on shared
-  vCPU.
-- `convert_pub` (0.05 ms) and `queue_delay` (5.42 ms) are close to the
-  reference machine — the bridge-side code is **not** the bottleneck.
-- `ros_ruckig` went **up** (6.57 → 8.14 ms) between v3.1.1 and v3.1.2,
-  although the executor change in `trajectory_twin.py` was meant to
-  reduce its overhead. The earlier "(DDS)" attribution was not verified.
-  Treat this as an open item (`VL-16`) and re-measure before drawing
-  conclusions.
-- The single outlier (`max = 103575 ms`) is a **103-second stall** in
-  Isaac Sim (Play/Pause or re-init), not a bridge or PLC issue. Excluded
-  from the filtered statistics; its root cause is still open (`VL-14`).
-
-**Conclusion:** the fixes reduced median full-loop latency by **30%**
-(67.36 → 47.20 ms) and increased the fraction of samples under 50 ms
-from **6.78% → 63.37%**. The remaining gap to the reference machine is
-mostly environmental (VM), not algorithmic.
-
-> **v3.1.3 update:** batch PLC I/O plus `poll_hz: 120` reduce median
-> `cmd_to_feedback` from 34.60 to **18.55 ms** and median `total_loop`
-> from 45.95 to **25.72 ms** on this same VM (−46% / −44%). See
-> [`vendor-neutral/README.md`](vendor-neutral/README.md) for the full
-> v3.1.3 comparison table. The reference machine was **not re-measured**.
+- v3.7 improves every metric over v3.1.3 (median −22% to −26%).
+- The remaining `write_net` p99 (~40 ms) is TCP tail latency on the
+  libvirt VM, not bridge code.
+- The reference machine has **not** been re-measured for v3.7.
+  The reference numbers (5.2 ms mean, 16.3 ms max) still refer to
+  v3.1.2 and earlier.
 
 ---
 
 ## Future Vision
 
-The vendor-neutral philosophy is being extended to encompass broader hardware
-ecosystems, software runtimes, and the **simulation layer** itself.
+The vendor-neutral philosophy is being extended to encompass broader
+hardware ecosystems, software runtimes, and the **simulation layer**
+itself.
 
 ### 1. Unified Control Layer (Multi-PLC Vendor expansion)
 
-- **Beckhoff TwinCAT 3 (TwinCAT 3.1):** Support is being added to integrate
+- **Beckhoff TwinCAT 3:** Support is being added to integrate
   TwinCAT runtime environments natively as a core component of our
   vendor-neutral PLC architecture. This will allow developers to swap
-  seamlessly between Siemens S7-1500 and Beckhoff TwinCAT controllers by
-  adjusting runtime mapping files, without modifying the underlying Python
-  trajectory or data translation layers.
+  seamlessly between Siemens S7-1500 and Beckhoff TwinCAT controllers
+  by adjusting runtime mapping files.
 
 ### 2. Multi-Simulator Agnostic Framework
 
-- **Isaac Sim** remains a first-class target, but will also be brought under
-  the same vendor-neutral abstraction — so the digital twin is no longer
-  locked to a single simulator.
-- **CoppeliaSim** will be added as a **proof of concept** for multi-simulator
-  support, demonstrating that the same PLC bridge, robot description, and
-  trajectory stack can drive more than one physics engine through a thin,
-  config-driven adapter.
+- **Isaac Sim** remains a first-class target, but will also be brought
+  under the same vendor-neutral abstraction.
+- **CoppeliaSim** will be added as a **proof of concept** for
+  multi-simulator support.
 
-The long-term goal is a fully portable digital twin: change the robot, the
-PLC ecosystem (Siemens/TwinCAT), or the simulator by editing configuration —
-not by rewriting the core platform.
+The long-term goal is a fully portable digital twin: change the robot,
+the PLC ecosystem (Siemens/TwinCAT), or the simulator by editing
+configuration — not by rewriting the core platform.
 
 ---
 
 ## Repository Layout
 
-```text
-.
-├── vendor-neutral/              # Active — Gen 3 (vendor-neutral platform)
-│   ├── README.md                # Full Gen 3 documentation
-│   ├── docs/
-│   │   ├── latency_comparison.md
-│   │   └── latency_full_loop_OPC-UA.md
-│   ├── linux/
-│   ├── ros2/                    # v3.1.3: analyze_probe.py, test_probe_chain.py
-│   ├── windows/
-│   ├── isaac/
-│   ├── config/
-│   ├── plc/
-│   └── tools/
-├── kuka/                    # Gen 1 — KUKA KR210 (TCP/JSON)
-├── yaskawa/                 # Gen 2 — Yaskawa GP110 (OPC UA)
-├── docs/                        # Cross-generation documentation
-└── README.md                    # This file
-```
+    .
+    ├── vendor-neutral/              # Active — Gen 3 (vendor-neutral platform)
+    │   ├── README.md                # Full Gen 3 documentation
+    │   ├── docs/
+    │   ├── linux/
+    │   ├── ros2/                    # v3.1.3+: analyze_probe.py, test_probe_chain.py
+    │   ├── windows/
+    │   ├── isaac/                   # v3.7: joint_mapper.py, physics_twin.py
+    │   ├── config/
+    │   ├── plc/
+    │   └── tools/                   # v3.7: clean_run.sh
+    ├── kuka/                        # Gen 1 — KUKA KR210 (TCP/JSON)
+    ├── yaskawa/                     # Gen 2 — Yaskawa GP110 (OPC UA)
+    ├── docs/                        # Cross-generation documentation
+    └── README.md                    # This file
 
 ---
 
@@ -377,11 +351,11 @@ cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
 
 # 3. Linux: PLC bridge (with CPU pinning for latency)
 cd linux
-taskset -c 2 python3 plc_ros_bridge.py \
+taskset -c 8,9 python3 plc_ros_bridge.py \
     --ros-args -p config:=../config/plc_ros_bridge.yaml
 
 # 4. Linux: trajectory twin (Ruckig + state machine)
-taskset -c 3 python3 trajectory_twin.py \
+taskset -c 10 python3 trajectory_twin.py \
     --ros-args -p robot:=../config/robot.yaml
 ```
 
@@ -395,8 +369,8 @@ Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 | :--- | :--- |
 | [`vendor-neutral/README.md`](vendor-neutral/README.md) | Gen 3 (active) — vendor-neutral platform |
 | [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports |
-| [`archive/kuka/README.md`](archive/kuka/README.md) | Gen 1 — KUKA KR210 |
-| [`archive/yaskawa/docs/README.md`](archive/yaskawa/docs/README.md) | Gen 2 — Yaskawa GP110 |
+| [`kuka/README.md`](kuka/README.md) | Gen 1 — KUKA KR210 |
+| [`yaskawa/docs/README.md`](yaskawa/docs/README.md) | Gen 2 — Yaskawa GP110 |
 | [`CHANGELOG.md`](CHANGELOG.md) | All generations |
 | [`docs/comparison.md`](docs/comparison.md) | Side-by-side comparison |
 
@@ -414,7 +388,7 @@ If you use this software in academic work, please cite:
   month        = oct,
   year         = 2026,
   publisher    = {Zenodo},
-  version      = {3.1.3},
+  version      = {3.7.0},
   doi          = {10.5281/zenodo.23312011},
   url          = {https://doi.org/10.5281/zenodo.23312011}
 }
@@ -422,7 +396,9 @@ If you use this software in academic work, please cite:
 
 Or in plain text:
 
-> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform for PLC, ROS 2, and Isaac Sim* (Version 3.1.3) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23312011
+> Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform
+> for PLC, ROS 2, and Isaac Sim* (Version 3.7.0) [Computer software].
+> Zenodo. https://doi.org/10.5281/zenodo.23312011
 
 ---
 

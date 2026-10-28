@@ -1,21 +1,14 @@
-# plc_server_win4.py
+# plc_server_win.py
 # Runs on Windows. Serves PLCSIM tags over TCP as JSON.
 #
-# v3.2 changes:
-#   - FIXED: EPrimitiveDataType members are .NET primitive names
-#     (Double, Int32, Int16, Bool), NOT Siemens names (LReal, DInt, Int).
-#     _TYPE_NAMES now maps to the correct member names, so the self-test
-#     passes and batch mode is actually enabled.
-#   - BATCH can be toggled from outside without editing the file:
-#         PowerShell:  $env:PLC_BATCH = "0"   # disable
-#                      $env:PLC_BATCH = "1"   # enable (default)
-#         cmd.exe:     set PLC_BATCH=0
-#     Same for TIMING: $env:PLC_TIMING = "0" / set PLC_TIMING=0.
-#
-# Run with (PowerShell):
-#     python .\plc_server_win4.py
-#     # or, to disable batch in this shell:
-#     $env:PLC_BATCH = "0"; python .\plc_server_win4.py
+# v3.3 changes:
+#   - ADDED "sync" command: combines read + write into ONE TCP request.
+#     The bridge can send read tags and write tags together, getting both
+#     results in a single network round-trip.
+#   - Existing "read" and "write" commands are preserved for backward
+#     compatibility and testing.
+#   - BATCH can be toggled from outside (PLC_BATCH=0 to disable).
+#   - TIMING can be toggled from outside (PLC_TIMING=0 to disable).
 
 import os
 import sys
@@ -161,11 +154,6 @@ _MAX_BATCH_FAILS = 3
 
 _B = {"ok": False, "why": "not initialised", "fails": 0}
 
-# EPrimitiveDataType members are .NET names, NOT Siemens names:
-#   Siemens LReal  -> .NET Double
-#   Siemens DInt   -> .NET Int32
-#   Siemens Int    -> .NET Int16
-#   Siemens Bool   -> .NET Bool
 _TYPE_NAMES = {
     BOOL:  ["Bool", "Boolean"],
     LREAL: ["Double"],
@@ -177,7 +165,6 @@ _PY_CAST = {BOOL: bool, LREAL: float, DINT: int, INT: int}
 
 
 def _clr_members(obj):
-    """Field + property names of a .NET value (falls back to dir())."""
     names = set()
     try:
         t = obj.GetType()
@@ -198,7 +185,6 @@ def _code_ok(code):
 
 
 def _init_batch():
-    """Discover the managed struct layout. Returns (ok, reason)."""
     try:
         from Siemens.Simatic.Simulation.Runtime import (
             SDataValueByName, EPrimitiveDataType as EDataType,
@@ -273,7 +259,6 @@ def _build_array(items, with_values):
 
 
 def _batch_read(items):
-    """items: [(name, type)] -> [value or 'ERR:...'] using ONE API call."""
     t0 = time.perf_counter() if TIMING else 0.0
     arr = _build_array(items, with_values=False)
     instance.ReadSignals(arr)
@@ -290,7 +275,6 @@ def _batch_read(items):
 
 
 def _batch_write(items):
-    """items: [(name, type, value)] -> [bool] using ONE API call."""
     t0 = time.perf_counter() if TIMING else 0.0
     arr = _build_array(items, with_values=True)
     instance.WriteSignals(arr)
@@ -310,12 +294,11 @@ def _batch_failed(where, err):
 
 
 def _selftest_batch():
-    """Batch must agree with per-tag calls. Returns (ok, reason)."""
     read_names = [
-        f"{DB}.MainRobotLeft_CmdAng[1]",           # LReal -> Double
-        f"{DB}.MainRobotLeft_CmdEnable",           # Bool
-        f"{DB}.Heartbeat_Counter",                 # DInt -> Int32
-        f"{DB}.Comm_State",                        # Int  -> Int16
+        f"{DB}.MainRobotLeft_CmdAng[1]",
+        f"{DB}.MainRobotLeft_CmdEnable",
+        f"{DB}.Heartbeat_Counter",
+        f"{DB}.Comm_State",
     ]
     items = [(n, TAGS[n]) for n in read_names if n in TAGS]
     try:
@@ -335,9 +318,9 @@ def _selftest_batch():
             return False, f"read mismatch on {n}: {x} vs {y}"
 
     write_names = [
-        f"{DB}.MainRobotLeft_ActAng[1]",           # LReal
-        f"{DB}.MainRobotLeft_CmdAck",              # Bool
-        f"{DB}.ROS_Ack_Counter",                   # DInt
+        f"{DB}.MainRobotLeft_ActAng[1]",
+        f"{DB}.MainRobotLeft_CmdAck",
+        f"{DB}.ROS_Ack_Counter",
     ]
     w = [(n, TAGS[n]) for n in write_names if n in TAGS]
     try:
@@ -355,13 +338,6 @@ def _selftest_batch():
 
 
 def setup_batch():
-    """Enable / disable batch from the OUTSIDE (env var PLC_BATCH).
-
-    Examples:
-        PowerShell :  $env:PLC_BATCH = "0"; python .\\plc_server_win4.py
-        cmd.exe    :  set PLC_BATCH=0 && python plc_server_win4.py
-        default    :  batch ON
-    """
     print(f"[batch] env PLC_BATCH = {os.environ.get('PLC_BATCH', '<unset>')}")
     print(f"[batch] env PLC_TIMING = {os.environ.get('PLC_TIMING', '<unset>')}")
     if not BATCH_ENABLED:
@@ -427,7 +403,6 @@ def write_tag(name, value):
 
 
 def _expand(name):
-    """name -> ('array'|'tag', [(element_name, type)]) or None if unknown."""
     if name in ARRAYS:
         tmpl, t, n = ARRAYS[name]
         return "array", [(tmpl.format(i=i), t) for i in range(1, n + 1)]
@@ -437,7 +412,6 @@ def _expand(name):
 
 
 def read_many(names):
-    """Read several tags/arrays. ONE API call in batch mode."""
     result, plan, flat = {}, [], []
     for n in names:
         e = _expand(n)
@@ -469,7 +443,6 @@ def read_many(names):
 
 
 def write_many(writes):
-    """Write several tags/arrays. ONE API call in batch mode."""
     result, plan, flat = {}, [], []
     for n, v in writes.items():
         e = _expand(n)
@@ -555,6 +528,14 @@ def handle_client(conn, addr):
                     result = write_many(writes)
                     reply = {"written": result}
 
+                elif cmd == "sync":
+                    # NEW: combined read + write in one request
+                    read_names = req.get("read", [])
+                    writes = req.get("write", {})
+                    result_read = read_many(read_names)
+                    result_write = write_many(writes) if writes else {}
+                    reply = {"values": result_read, "written": result_write}
+
                 elif cmd == "list":
                     reply = {
                         "tags": list(TAGS.keys()),
@@ -586,7 +567,7 @@ def main():
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((host, port))
     srv.listen(5)
-    setup_batch()          # env vars are read here, BEFORE any client is served
+    setup_batch()
     print(f"TCP server listening on {host}:{port}")
     if TIMING:
         print("PLC_TIMING=1 (default): timing report every 10 s")

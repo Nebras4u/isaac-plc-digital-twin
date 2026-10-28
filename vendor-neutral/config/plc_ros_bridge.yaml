@@ -72,7 +72,7 @@ publish:
   - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
   - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
 
-poll_hz: 120
+poll_hz: 200
 watchdog_timeout: 4.0
 backoff_max: 30.0
 warn_cooldown: 60.0
