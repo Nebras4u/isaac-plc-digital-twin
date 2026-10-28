@@ -1047,16 +1047,16 @@ Measured after the v3.1.2 fixes described below.
 
 **Full-loop latency** (1,881 samples, `latency_probe: true`, v3.1.2):
 
-| Stage          | Median   | p95      | p99       | Max        |
-| :------------- | -------: | -------: | --------: | ---------: |
-| `queue_delay`  | 5.42 ms  | 7.41 ms  | 8.04 ms   | 10.30 ms   |
-| `read_net`     | 6.73 ms  | 13.08 ms | 46.32 ms  | 118.33 ms  |
-| `convert_pub`  | 0.05 ms  | 0.08 ms  | 0.10 ms   | 0.16 ms    |
-| `ros_ruckig`   | 8.14 ms  | 21.81 ms | 75.53 ms  | 502.71 ms  |
-| `isaac_step`   | 10.25 ms | 26.11 ms | 30.79 ms  | 103575.93 ms |
-| `ros_back`     | 0.37 ms  | 1.83 ms  | 2.64 ms   | 3.33 ms    |
-| `write_net`    | 12.15 ms | 20.61 ms | 36.79 ms  | 132.64 ms  |
-| **`total_loop`** | **47.20 ms** | **67.28 ms** | **151.49 ms** | **104091.64 ms** |
+| Stage            | Median      | p95         | p99          | Max             |
+|:-----------------|------------:|------------:|-------------:|----------------:|
+| `queue_delay`    | 5.42 ms     | 7.41 ms     | 8.04 ms      | 10.30 ms        |
+| `read_net`       | 6.73 ms     | 13.08 ms    | 46.32 ms     | 118.33 ms       |
+| `convert_pub`    | 0.05 ms     | 0.08 ms     | 0.10 ms      | 0.16 ms         |
+| `ros_ruckig`     | 8.14 ms     | 21.81 ms    | 75.53 ms     | 502.71 ms       |
+| `isaac_step`     | 10.25 ms    | 26.11 ms    | 30.79 ms     | 103575.93 ms    |
+| `ros_back`       | 0.37 ms     | 1.83 ms     | 2.64 ms      | 3.33 ms         |
+| `write_net`      | 12.15 ms    | 20.61 ms    | 36.79 ms     | 132.64 ms       |
+| **`total_loop`** | **47.20 ms**| **67.28 ms**| **151.49 ms**| **104091.64 ms**|
 
 **LBP (Latency Bound Probability) — this machine (v3.1.2):**
 
@@ -1081,18 +1081,18 @@ Measured after the v3.1.2 fixes described below.
 
 **Comparison: before vs after fixes (v3.1.1 → v3.1.2):**
 
-| Stage          | Before (v3.1.1) | After (v3.1.2) | Improvement |
-| :------------- | --------------: | -------------: | ----------: |
-| `queue_delay`  | 4.67 ms         | **5.42 ms**    | (measurable now) |
-| `read_net`     | 6.88 ms         | **6.73 ms**    | −2%         |
-| `convert_pub`  | 0.06 ms         | **0.05 ms**    | −17%        |
-| `ros_ruckig`   | 6.57 ms         | **8.14 ms**    | +24% (unexplained, see below) |
-| `isaac_step`   | 27.05 ms        | **10.25 ms**   | **−62%** ✅ |
-| `ros_back`     | 4.66 ms         | **0.37 ms**    | **−92%** ✅ |
-| `write_net`    | 15.72 ms        | **12.15 ms**   | −23%        |
-| **`total_loop`** | **67.36 ms**  | **47.20 ms**   | **−30%** ✅ |
-| LBP ≤ 50 ms    | 6.78%           | **63.37%**     | **+56.59%** ✅ |
-| LBP ≤ 80 ms    | 75.45%          | **96.60%**     | **+21.15%** ✅ |
+| Stage            | Before (v3.1.1) | After (v3.1.2) | Improvement                  |
+|:-----------------|----------------:|---------------:|-----------------------------:|
+| `queue_delay`    | 4.67 ms         | **5.42 ms**    | (measurable now)             |
+| `read_net`       | 6.88 ms         | **6.73 ms**    | −2%                          |
+| `convert_pub`    | 0.06 ms         | **0.05 ms**    | −17%                         |
+| `ros_ruckig`     | 6.57 ms         | **8.14 ms**    | +24% (unexplained, see below)|
+| `isaac_step`     | 27.05 ms        | **10.25 ms**   | **−62%** ✅                  |
+| `ros_back`       | 4.66 ms         | **0.37 ms**    | **−92%** ✅                  |
+| `write_net`      | 15.72 ms        | **12.15 ms**   | −23%                         |
+| **`total_loop`** | **67.36 ms**    | **47.20 ms**   | **−30%** ✅                  |
+| LBP ≤ 50 ms      | 6.78%           | **63.37%**     | **+56.59%** ✅               |
+| LBP ≤ 80 ms      | 75.45%          | **96.60%**     | **+21.15%** ✅               |
 
 **What changed (v3.1.2):**
 
@@ -1198,11 +1198,11 @@ mode or GPU passthrough, `VL-19`) and the network link to the PLC.
 > (Ubuntu 24.04, RTX 5060, shared vCPU, PLCSIM Advanced V6.0).
 > **They are NOT from the reference machine.**
 
-> **Summary:** v3.5–v3.7 fixed a chain of probe-starvation bugs,
-> rewrote the trajectory twin deduplication, extracted `JointMapper`
-> to a standalone module, and raised `poll_hz` to 200. On the same VM,
-> median `cmd_to_feedback` dropped from **18.55 → 14.48 ms** (−22%)
-> and LBP ≤ 20 ms rose from **59.17% → 90.37%** (+31pp).
+Summary: v3.5–v3.7 fixed a chain of probe-starvation bugs,
+rewrote the trajectory twin deduplication, extracted JointMapper
+to a standalone module, and raised poll_hz to 200. On the same VM,
+median cmd_to_feedback dropped from 18.55 → 14.62 ms (−21%)
+and LBP ≤ 20 ms rose from 59.17% → 91.40% (+32pp).
 
 **What changed**
 
@@ -1268,7 +1268,7 @@ mode or GPU passthrough, `VL-19`) and the network link to the PLC.
 
 **New observability (`tick_stats`):**
 
-    probe_sent=82000 probe_attempted=2691 probe_rows=2691
+    probe_sent=20000 probe_attempted=1396 probe_rows=1396
     probe_rejected=0 probe_order_violations=0
 
 - `probe_sent` — tags authored by the bridge (`/plc/cmd_ang`)
@@ -1404,7 +1404,7 @@ external knob at 60 Hz:
 | v3.1.3  | Any robot     | Any transport     | + batch PLC I/O, `poll_hz` 120, probe analysis tool, 10 standalone tests        | `vendor-neutral/`            |
 | v3.5.0  | Any robot     | Any transport     | + trajectory_twin fixes (validation, applied dedupe, passive axis)              | `vendor-neutral/`            |
 | v3.6.0  | Any robot     | Any transport     | + probe chain fixes (100% capture), same-tick `act_ang` write                   | `vendor-neutral/`            |
-| v3.7.0  | Any robot     | Any transport     | + `probe_attempted`, `joint_mapper.py`, `poll_hz` 200, 51+8 tests, 14.48 ms p50 | `vendor-neutral/`            |
+| v3.7.0  | Any robot     | Any transport     | + probe_attempted, joint_mapper.py, poll_hz 200, 51+8 tests, 14.62 ms p50       | vendor-neutral/              |
 
 ---
 
