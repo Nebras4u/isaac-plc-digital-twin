@@ -8,27 +8,29 @@
 #   * Setpoint older than `setpoint_timeout_s` → HOLD last valid target.
 #   * /plc/emergency_stop = True              → HOLD current position.
 #
-# DOF ordering:
-#   JointMapper fails hard if robot.dof_names != robot.yaml all_joints set.
+# v4.0 — industrial type-safety (mirrors plc_ros_bridge.py v4.0):
+#   * NaN/Inf rejection at ALL boundaries (non-negotiable, no opt-out):
+#       - on_setpoint : non-finite positions dropped per-joint;
+#         name/position length mismatch rejects the whole message.
+#       - _seed/_refresh : refuses non-finite joint state from Isaac
+#         (prevents contaminating the E-stop hold position).
+#       - publish_states : /joint_states is not published if any
+#         position or velocity component is non-finite.
+#   * Per-reason rejection counters (`_stats`), surfaced in the 10-s
+#     status log and in throttled warnings.
+#   * Optional joint-limit checking against Isaac RevoluteJoint limits
+#     (default: warn only; `enforce_joint_limits=True` rejects).
 #
-# QoS:
-#   /servo_setpoints    sub: BEST_EFFORT depth=1
-#   /plc/emergency_stop sub: TRANSIENT_LOCAL
-#   /joint_states       pub: BEST_EFFORT depth=1
-#
-# v3.6 changes:
-#   * [G] _applied_tag is NOT cleared on every publish. It is kept until
-#     either (a) the setpoint ages past TAG_VALID_S, or (b) a newer
-#     setpoint arrives. This lets several /joint_states messages carry the
-#     same tag chain, so the latency probe has a chance to actually reach
-#     the bridge (previously 50% of /joint_states had no frame_id because
-#     the tag was consumed by the very first publish after each setpoint).
-#   * [H] Only the tag chain's ORIGINAL command origin is preserved. We
-#     never reattach a stale chain after TAG_VALID_S has elapsed.
+# v3.6 changes (unchanged):
+#   * [G] _applied_tag is NOT cleared on every publish.
+#   * [H] Only the tag chain's ORIGINAL command origin is preserved.
 
 import asyncio
+import math
 import sys
 import time
+from collections import defaultdict
+
 import numpy as np
 import yaml
 
@@ -46,9 +48,6 @@ from std_msgs.msg import Bool
 from isaacsim.core.prims import Articulation
 from pxr import UsdPhysics
 
-# --- Ensure joint_mapper is importable inside Isaac Sim's Script Editor ---
-# Isaac copies the script to /tmp/carb.*/script_*.py, so __file__ does not
-# point to /workspace. Add both candidate directories to sys.path.
 import os as _os
 _SCRIPT_DIR = _os.path.dirname(_os.path.abspath(__file__))
 for _p in (_SCRIPT_DIR, '/workspace'):
@@ -59,13 +58,14 @@ del _os, _SCRIPT_DIR, _p
 from joint_mapper import JointMapper
 
 
-DEFAULT_ROBOT_CFG    = "/workspace/robot.yaml"
-DEFAULT_PUBLISH_HZ   = 120.0
-DEFAULT_TIMEOUT_S    = 0.5
-TAG_VALID_S          = 0.5
-REINIT_BACKOFF_S     = 1.0
-STATUS_LOG_PERIOD_S  = 10.0
-MAX_MSG_PER_FRAME    = 8
+DEFAULT_ROBOT_CFG       = "/workspace/robot.yaml"
+DEFAULT_PUBLISH_HZ      = 120.0
+DEFAULT_TIMEOUT_S       = 0.5
+DEFAULT_WARN_COOLDOWN_S = 5.0
+TAG_VALID_S             = 0.5
+REINIT_BACKOFF_S        = 1.0
+STATUS_LOG_PERIOD_S     = 10.0
+MAX_MSG_PER_FRAME       = 8
 
 
 def load_robot_cfg(path: str) -> dict:
@@ -82,10 +82,12 @@ def load_robot_cfg(path: str) -> dict:
     return cfg
 
 
-def inspect_limits(joint_paths: dict):
+def inspect_limits(joint_paths: dict) -> dict:
+    """Print and return {joint_name: (lo, hi)} for revolute joints."""
     stage = omni.usd.get_context().get_stage()
     print("=" * 60)
     print("Joint limits:")
+    limits = {}
     for name, path in joint_paths.items():
         prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
@@ -96,9 +98,12 @@ def inspect_limits(joint_paths: dict):
             lo = joint.GetLowerLimitAttr().Get()
             hi = joint.GetUpperLimitAttr().Get()
             print(f"  {name}: [{lo}, {hi}]")
+            if lo is not None and hi is not None:
+                limits[name] = (float(lo), float(hi))
         else:
             print(f"  {name}: no RevoluteJoint API")
     print("=" * 60)
+    return limits
 
 
 def configure_drives(drives: dict, joint_paths: dict):
@@ -119,8 +124,10 @@ def configure_drives(drives: dict, joint_paths: dict):
         drive.GetMaxForceAttr().Set(float(params["max_force"]))
         print(f"  [ok] {joint_name}: K={params['stiffness']:.0f} "
               f"D={params['damping']:.0f} F={params['max_force']:.0f}")
+
+
 class PhysicsTwin(Node):
-    def __init__(self, robot, mapper, cfg, params):
+    def __init__(self, robot, mapper, cfg, params, joint_limits=None):
         super().__init__("physics_twin")
         self.robot  = robot
         self.mapper = mapper
@@ -129,13 +136,21 @@ class PhysicsTwin(Node):
         self.publish_hz = max(1.0, float(params["publish_hz"]))
         self.timeout_s  = max(0.0, float(params["setpoint_timeout_s"]))
 
+        # v4.0: type-safety state
+        self._warn_cooldown  = float(params.get("warn_cooldown", DEFAULT_WARN_COOLDOWN_S))
+        self._enforce_limits = bool(params.get("enforce_joint_limits", False))
+        self._joint_limits   = dict(joint_limits or {})
+        self._stats          = defaultdict(lambda: defaultdict(int))
+        self._warned         = {}
+        self._known_joints   = set(mapper.dof_order)
+
         n = mapper.n
 
         self._latest_setpoint   = None
         self._last_sp_t         = 0.0
-        self._tag               = ""       # tag from most recent setpoint
-        self._tag_t             = 0.0      # monotonic when it arrived
-        self._applied_tag       = ""       # tag actually applied by step()
+        self._tag               = ""
+        self._tag_t             = 0.0
+        self._applied_tag       = ""
         self._applied_tag_t     = 0.0
         self._fresh_this_frame  = False
         self._estop_active      = False
@@ -144,6 +159,7 @@ class PhysicsTwin(Node):
         self._last_pub_t        = 0.0
         self._last_status_log_t = 0.0
         self._seed_done         = False
+        self._estop_hold_isaac  = None
 
         self._target_yaml      = np.zeros(n, dtype=np.float32)
         self._target_isaac     = np.zeros(n, dtype=np.float32)
@@ -183,17 +199,97 @@ class PhysicsTwin(Node):
 
         self.get_logger().info(
             f"PhysicsTwin ready. n={n} pub_hz={self.publish_hz} "
-            f"timeout={self.timeout_s}s gravity=ENABLED"
+            f"timeout={self.timeout_s}s gravity=ENABLED "
+            f"enforce_limits={self._enforce_limits}"
         )
         self.get_logger().info(f"DOF order (YAML) : {mapper.dof_order}")
         self.get_logger().info(f"DOF order (Isaac): {mapper.isaac_names}")
 
+    # ------------------------------------------------------------------ #
+    # v4.0 validation helpers
+    # ------------------------------------------------------------------ #
+    def _bump(self, name, reason):
+        key = reason.split(":", 1)[0] if isinstance(reason, str) else str(reason)
+        if not key:
+            key = "bad_value"
+        self._stats[name][key] += 1
+        self._stats[name]["rejected_total"] += 1
+
+    def _warn(self, name, message):
+        now = time.monotonic()
+        if now - self._warned.get(name, 0.0) > self._warn_cooldown:
+            self._warned[name] = now
+            counts = dict(self._stats.get(name, {}))
+            self.get_logger().warn(f"{message} [counts={counts}]")
+
+    def _check_finite(self, arr, label):
+        """Return arr if every element is finite; else None (+bump+warn)."""
+        if arr is None:
+            self._bump(label, "none")
+            return None
+        try:
+            mask = np.isfinite(arr)
+            if not mask.all():
+                bad = np.where(~mask)[0]
+                idx = int(bad[0])
+                self._bump(label, "non_finite")
+                self._warn(label, f"{label}[{idx}] non-finite: {arr[idx]!r}")
+                return None
+        except Exception as e:
+            self._bump(label, "check_error")
+            self._warn(label, f"{label} finite check failed: {e}")
+            return None
+        return arr
+
+    def _validate_setpoint(self, msg: JointState):
+        """Return {joint_name: float} of valid entries, or None if unusable."""
+        if len(msg.name) != len(msg.position):
+            self._bump("__setpoint__", "length_mismatch")
+            self._warn("__setpoint__",
+                       f"length mismatch: name={len(msg.name)} "
+                       f"pos={len(msg.position)}")
+            return None
+
+        sp = {}
+        for name, pos in zip(msg.name, msg.position):
+            if name not in self._known_joints:
+                self._bump(name, "unknown_joint")
+                self._warn(name, "unknown joint in setpoint")
+                continue
+            try:
+                f = float(pos)
+            except (TypeError, ValueError):
+                self._bump(name, "bad_type")
+                self._warn(name, f"bad setpoint type: {type(pos).__name__}")
+                continue
+            if not math.isfinite(f):
+                self._bump(name, "non_finite")
+                self._warn(name, f"non-finite setpoint: {f!r}")
+                continue
+            if self._joint_limits:
+                lo, hi = self._joint_limits.get(name, (-math.inf, math.inf))
+                if f < lo or f > hi:
+                    self._bump(name, "below_min" if f < lo else "above_max")
+                    self._warn(name,
+                               f"setpoint {f} outside Isaac limits [{lo},{hi}]")
+                    if self._enforce_limits:
+                        continue
+            sp[name] = f
+
+        if not sp:
+            self._bump("__setpoint__", "all_rejected")
+            return None
+        return sp
+
+    # ------------------------------------------------------------------ #
+    # Callbacks
+    # ------------------------------------------------------------------ #
     def on_setpoint(self, msg: JointState):
         if self._estop_active:
             return
-        sp = {}
-        for name, pos in zip(msg.name, msg.position):
-            sp[name] = float(pos)
+        sp = self._validate_setpoint(msg)
+        if sp is None:
+            return
         self._latest_setpoint = sp
         self._tag              = msg.header.frame_id
         self._tag_t            = time.monotonic()
@@ -210,9 +306,14 @@ class PhysicsTwin(Node):
             self._tag_t           = 0.0
             self._applied_tag     = ""
             self._applied_tag_t   = 0.0
+            self._estop_hold_isaac = None
         elif not self._estop_active and was:
+            self._estop_hold_isaac = None
             self.get_logger().info("E-Stop CLEARED — awaiting fresh setpoint")
 
+    # ------------------------------------------------------------------ #
+    # Isaac interaction
+    # ------------------------------------------------------------------ #
     def _seed_from_current(self) -> bool:
         try:
             cur = self.robot.get_joint_positions()
@@ -220,6 +321,9 @@ class PhysicsTwin(Node):
             print(f"[physics_twin] seed: get_joint_positions failed: {e}")
             return False
         if cur is None:
+            return False
+        if self._check_finite(cur[0], "__seed__") is None:
+            self._bump("__seed__", "refused")
             return False
         self._last_valid_isaac[:] = cur[0]
         self._last_valid_yaml[:]  = cur[0][self.mapper.yaml_to_isaac]
@@ -235,6 +339,9 @@ class PhysicsTwin(Node):
             return False
         if cur is None:
             return False
+        if self._check_finite(cur[0], "__refresh__") is None:
+            self._bump("__refresh__", "refused")
+            return False
         self._current_isaac[:] = cur[0]
         return True
 
@@ -242,9 +349,15 @@ class PhysicsTwin(Node):
         self._fresh_this_frame = False
 
         if self._estop_active:
-            if not self._refresh_current():
-                return False
-            self._target_isaac[:] = self._current_isaac
+            if self._estop_hold_isaac is None:
+                if not self._refresh_current():
+                    return False
+                self._estop_hold_isaac = self._current_isaac.copy()
+                self._last_valid_isaac[:] = self._estop_hold_isaac
+                self._last_valid_yaml[:] = (
+                    self._estop_hold_isaac[self.mapper.yaml_to_isaac])
+                self._seed_done = True
+            self._target_isaac[:] = self._estop_hold_isaac
             return True
 
         if self._latest_setpoint is None:
@@ -279,7 +392,6 @@ class PhysicsTwin(Node):
     def step(self):
         if not self._build_target():
             return
-
         try:
             self.robot.set_joint_position_targets(
                 positions=self._target_isaac_2d,
@@ -289,7 +401,6 @@ class PhysicsTwin(Node):
             print(f"[physics_twin] set_joint_position_targets failed: {e}")
             self._needs_reinit = True
             return
-
         if self._fresh_this_frame:
             self._applied_tag   = self._tag
             self._applied_tag_t = self._tag_t
@@ -310,11 +421,19 @@ class PhysicsTwin(Node):
         if pos is None:
             return
 
-        self._current_isaac[:] = pos[0]
+        # v4.0: refuse to publish /joint_states if any component is non-finite.
+        if self._check_finite(pos[0], "__joint_states_pos__") is None:
+            self._bump("__joint_states__", "pos_non_finite")
+            return
         if vel is not None:
+            if self._check_finite(vel[0], "__joint_states_vel__") is None:
+                self._bump("__joint_states__", "vel_non_finite")
+                return
             self._velocity_isaac[:] = vel[0]
         else:
             self._velocity_isaac[:] = 0.0
+
+        self._current_isaac[:] = pos[0]
 
         pos_yaml = self._current_isaac[self.mapper.yaml_to_isaac]
         vel_yaml = self._velocity_isaac[self.mapper.yaml_to_isaac]
@@ -326,11 +445,7 @@ class PhysicsTwin(Node):
         msg.velocity     = vel_yaml.tolist()
         msg.effort       = []
 
-        # v3.6 [G]: keep the tag attached as long as it's fresh. Multiple
-        # /joint_states messages may carry the same tag chain while it's
-        # valid; the bridge dedupes on the origin timestamp inside the tag
-        # (see _LatencyProbe.record → nums[0] == self._last check).
-        tag = self._applied_tag
+        tag   = self._applied_tag
         fresh = (
             tag
             and not self._estop_active
@@ -340,8 +455,6 @@ class PhysicsTwin(Node):
             msg.header.frame_id = f"{tag};{time.monotonic_ns()}"
         else:
             msg.header.frame_id = ""
-            # The tag chain is now definitively dead. Drop it so we do not
-            # keep re-checking the age on every publish.
             self._applied_tag   = ""
             self._applied_tag_t = 0.0
             self._tag           = ""
@@ -351,11 +464,16 @@ class PhysicsTwin(Node):
 
         if (now - self._last_status_log_t) >= STATUS_LOG_PERIOD_S:
             self._last_status_log_t = now
-            sp_age = (now - self._last_sp_t) if self._last_sp_t else -1.0
+            sp_age    = (now - self._last_sp_t) if self._last_sp_t else -1.0
+            total_rej = sum(c.get("rejected_total", 0) for c in self._stats.values())
             self.get_logger().info(
                 f"gravity=ENABLED estop={self._estop_active} "
-                f"reinit_pending={self._needs_reinit} sp_age={sp_age:.2f}s"
+                f"reinit_pending={self._needs_reinit} sp_age={sp_age:.2f}s "
+                f"rejections={total_rej}"
             )
+            for name, c in self._stats.items():
+                if c.get("rejected_total", 0) > 0:
+                    self.get_logger().warn(f"  rejections[{name}]={dict(c)}")
 
 
 def make_robot(robot_path: str) -> Articulation:
@@ -375,10 +493,14 @@ async def main():
     tmp.declare_parameter("robot_cfg",           DEFAULT_ROBOT_CFG)
     tmp.declare_parameter("publish_hz",          DEFAULT_PUBLISH_HZ)
     tmp.declare_parameter("setpoint_timeout_s",  DEFAULT_TIMEOUT_S)
+    tmp.declare_parameter("warn_cooldown",       DEFAULT_WARN_COOLDOWN_S)
+    tmp.declare_parameter("enforce_joint_limits", False)
     cfg_path = tmp.get_parameter("robot_cfg").value
     params   = {
-        "publish_hz":         tmp.get_parameter("publish_hz").value,
-        "setpoint_timeout_s": tmp.get_parameter("setpoint_timeout_s").value,
+        "publish_hz":           tmp.get_parameter("publish_hz").value,
+        "setpoint_timeout_s":   tmp.get_parameter("setpoint_timeout_s").value,
+        "warn_cooldown":        tmp.get_parameter("warn_cooldown").value,
+        "enforce_joint_limits": bool(tmp.get_parameter("enforce_joint_limits").value),
     }
     tmp.destroy_node()
 
@@ -395,7 +517,7 @@ async def main():
     print("Initializing physics twin (gravity ENABLED)...")
     print("=" * 60)
 
-    inspect_limits(joint_paths)
+    joint_limits = inspect_limits(joint_paths)
     configure_drives(cfg["drives"], joint_paths)
 
     print("Initializing articulation...")
@@ -406,8 +528,7 @@ async def main():
         print(f"[FATAL] {e}")
         raise
 
-    node = PhysicsTwin(robot, mapper, cfg, params)
-
+    node = PhysicsTwin(robot, mapper, cfg, params, joint_limits=joint_limits)
     print(f"Entering main loop. Publishing /joint_states @ ≤{node.publish_hz} Hz.")
 
     try:
@@ -430,9 +551,6 @@ async def main():
                     await omni.kit.app.get_app().next_update_async()
                     continue
 
-            # Bounded spin_all: drain up to MAX_MSG_PER_FRAME per frame so
-            # E-Stop and setpoint from the same DDS burst are both handled
-            # before step().
             for _ in range(MAX_MSG_PER_FRAME):
                 try:
                     rclpy.spin_once(node, timeout_sec=0.0)
