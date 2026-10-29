@@ -4,6 +4,9 @@ v3.6:
   * _publish() signature is (ctrl_positions, tag, tag_t)
   * _cmd_tag is NOT consumed in servo_tick; consumed by _publish().
   * _cmd_tag_t tracks arrival time.
+
+v4.0:
+  * servo_tick calls self._bump() on bad commands; the mock node needs it.
 """
 import threading
 import time
@@ -110,6 +113,20 @@ def test_sync_state_zeros_velocity_on_jump():
     assert p.inp.current_velocity == [0.0, 0.0]
 
 
+def test_sync_state_refuses_non_finite_input():
+    """v4.0: non-finite input must not contaminate Ruckig state."""
+    p = RuckigPlanner(
+        dof=2, control_hz=100,
+        max_vel=1.0, max_acc=2.0, max_jerk=10.0,
+        jump_threshold=0.3,
+        brake_acc_mult=4.0, brake_jerk_mult=8.0,
+    )
+    p.reset([0.0, 0.0])
+    before = list(p.inp.current_position)
+    p.sync_state(np.array([float("nan"), 0.0]))
+    assert list(p.inp.current_position) == before
+
+
 # ===========================================================================
 # _publish
 # ===========================================================================
@@ -135,6 +152,13 @@ def _make_publish_node(tag="", tag_t=0.0):
     )
     node.planner = types.SimpleNamespace(
         _has_target=False, _target_pos=[0.0] * 4)
+    # v4.0: bind real _bump / _warn
+    from collections import defaultdict
+    node._stats = defaultdict(lambda: defaultdict(int))
+    node._warned = {}
+    node._warn_cooldown = 5.0
+    node._bump = TrajectoryTwin._bump.__get__(node)
+    node._warn = TrajectoryTwin._warn.__get__(node)
     return node
 
 
@@ -163,6 +187,14 @@ def test_publish_keeps_newer_tag():
                             "p;100;200;300;400", 12345.0)
     assert node._cmd_tag == "p;999;888;777;666"
     assert node._cmd_tag_t == 99999.0
+
+
+def test_publish_rejects_non_finite():
+    """v4.0: NaN/Inf in ctrl_positions must not reach setpoint_pub."""
+    node = _make_publish_node()
+    TrajectoryTwin._publish(node, [1.0, float("nan"), 3.0, 4.0], "", 0.0)
+    assert not node.setpoint_pub.publish.called
+    assert node._stats["__publish__"]["non_finite"] == 1
 
 
 # ===========================================================================
@@ -213,7 +245,13 @@ def _make_servo_node(**kw):
     planner._has_target = True
     node.planner = planner
 
-    # Bind the real _begin_brake so servo_tick can call it
+    # v4.0: bind real _bump / _warn / _begin_brake so servo_tick can call them
+    from collections import defaultdict
+    node._stats = defaultdict(lambda: defaultdict(int))
+    node._warned = {}
+    node._warn_cooldown = 5.0
+    node._bump = TrajectoryTwin._bump.__get__(node)
+    node._warn = TrajectoryTwin._warn.__get__(node)
     node._begin_brake = TrajectoryTwin._begin_brake.__get__(node)
 
     return node
@@ -256,6 +294,8 @@ def test_bad_command_starts_braking():
     TrajectoryTwin.servo_tick(node)
     assert node._state == STOPPING
     assert node.planner.start_brake.called
+    # v4.0: rejection counter bumped for the offending joint
+    assert node._stats["j4"]["above_max"] == 1
 
 
 def test_estop_starts_braking():

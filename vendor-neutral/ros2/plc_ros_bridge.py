@@ -1,15 +1,32 @@
 #!/usr/bin/env python3
 """PLC <-> ROS 2 bridge (vendor neutral).
 
-v3.7 — adds probe_attempted counter to distinguish "tag arrived but was
-rejected" (e.g. stale > PROBE_MAX_AGE_NS) from "bridge didn't publish a
-tag". This removes the ambiguity of probe_sent=0 in configs where the
-bridge is not the /plc/cmd_ang publisher (e.g. an external test node
-provides the tags instead).
+v4.0 — industrial type-safety overhaul (integrated on top of v3.7+):
+  * Wire-level NaN/Inf rejection:
+      - plc_server_win.py sends JSON with allow_nan=False.
+      - TcpJsonDriver parses with a parse_constant that raises on
+        NaN/Infinity; then re-checks every value against the config-
+        declared type via _wire_type_check.
+  * Driver-level type check (_wire_type_check): mismatches surface as
+    "ERR:TYPE:..." strings, not silent coercions.
+  * _get is a validator, not a coercer. strict_types=True (default)
+    rejects str->int, int->bool, float->int, etc. No silent truncation,
+    no silent NaN.
+  * Per-signal min/max range checks from config.
+  * Per-signal rejection counters (`_stats`) in _probe_stats() and
+    _diag().
+  * Boot-time type handshake (TcpJsonDriver only): server's declared
+    types compared against config; mismatch is logged loudly and,
+    with strict_type_handshake=True, aborts the connection.
+  * act_ang NaN guard: /joint_states with non-finite positions is
+    never written to the PLC (cmd_ack/feedback_valid go False instead).
+  * strict_types=False + _coerce_legacy() for transitional deployment:
+    old behaviour restored, but _to_int_checked and _to_finite_float
+    still prevent silent truncation and NaN.
+  * PlcApiDriver default instance name corrected to "296" (matches
+    plc_server_win.py).
 
-Also adds a defence-in-depth check for _js_tag: it is not consumed unless
-needs_write=True.
-
+v3.7 — probe_attempted counter.
 v3.6 — same-tick act_ang write.
 v3.4 — initial same-tick refactor.
 """
@@ -20,6 +37,7 @@ import math
 import socket
 import threading
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import rclpy
@@ -35,25 +53,9 @@ from safety import ESTOP_TOPIC, resolve_estop
 
 
 # =============================================================================
-# Latency probe
+# Latency probe (unchanged)
 # =============================================================================
 class _LatencyProbe:
-    """One CSV row per command whose feedback reached the PLC.
-
-    Tag on the wire (every node appends ONE timestamp, all time.monotonic_ns()):
-        bridge  : p;origin;read_start;read_done;cmd_pub
-        traj    : ...;sp_pub
-        physics : ...;js_pub          -> 7 parts in total
-    The bridge adds js_recv (when joint_states arrived) and write_done (when
-    the feedback carrying that tag was written to the PLC).
-    It also adds hb_counter_val (the PLC heartbeat counter at read time).
-
-    Counters:
-      rows              : successfully written rows
-      attempted         : every record() call (before validation)
-      rejected          : malformed tag / wrong part count / not 'p' prefix
-      order_violations  : timestamps not monotonic; still written, but flagged
-    """
     COLS = ["origin_ns", "read_start_ns", "read_done_ns", "cmd_pub_ns",
             "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns", "hb_counter_val"]
     _N_PARTS = 7
@@ -85,7 +87,7 @@ class _LatencyProbe:
         if nums[0] == self._last:
             return False
         self._last = nums[0]
-        chain = nums + [js_recv_ns, write_done_ns, hb_counter_val]
+        chain = nums + [js_recv_ns, write_done_ns, int(hb_counter_val)]
         if any(b < a for a, b in zip(chain[:8], chain[1:8])):
             self.order_violations += 1
         self._w.writerow(chain)
@@ -117,6 +119,8 @@ CAST = {"bool": bool, "int": int, "float": float, "string": str}
 JS_STALE_AGE_S = 0.5
 PROBE_MAX_AGE_NS = 250_000_000
 ACT_ANG_DEADBAND_DEG = 0.001
+ACT_ANG_REFRESH_S = 0.5
+_INT_TOL = 1e-9
 
 PUB_STREAM_QOS = QoSProfile(depth=1)
 SUB_STREAM_QOS = QoSProfile(
@@ -124,7 +128,101 @@ SUB_STREAM_QOS = QoSProfile(
 
 
 # =============================================================================
-# Drivers — unchanged
+# v4.0: module-level type-safety helpers
+# =============================================================================
+_SERVER_TYPE_MAP = {
+    "Bool": "bool", "Boolean": "bool",
+    "LReal": "float", "Double": "float", "Real": "float",
+    "DInt": "int", "Int32": "int", "Int": "int", "Int16": "int",
+}
+
+
+def _wire_type_check(expected, v):
+    """Return value unchanged if v matches expected; else an ERR string.
+
+    Widening rule (float accepts int) is applied only for float signals.
+    bool is never accepted as int, even though it is a subclass.
+    """
+    if v is None:
+        return None
+    if isinstance(v, str) and v.startswith("ERR:"):
+        return v
+    if expected is None:
+        return v
+    if isinstance(v, (list, tuple)):
+        if expected == "int":
+            for x in v:
+                if isinstance(x, bool) or not isinstance(x, int):
+                    return f"ERR:TYPE:int_array:{type(x).__name__}"
+            return list(v)
+        if expected == "float":
+            for x in v:
+                if isinstance(x, bool) or not isinstance(x, (int, float)):
+                    return f"ERR:TYPE:float_array:{type(x).__name__}"
+            return list(v)
+        if expected == "bool":
+            for x in v:
+                if not isinstance(x, bool):
+                    return f"ERR:TYPE:bool_array:{type(x).__name__}"
+            return list(v)
+        if expected == "string":
+            for x in v:
+                if not isinstance(x, str):
+                    return f"ERR:TYPE:string_array:{type(x).__name__}"
+            return list(v)
+        return v
+    if expected == "bool":
+        return v if isinstance(v, bool) else f"ERR:TYPE:bool:{type(v).__name__}"
+    if expected == "int":
+        return v if (isinstance(v, int) and not isinstance(v, bool)) \
+                 else f"ERR:TYPE:int:{type(v).__name__}"
+    if expected == "float":
+        return v if (isinstance(v, (int, float)) and not isinstance(v, bool)) \
+                 else f"ERR:TYPE:float:{type(v).__name__}"
+    if expected == "string":
+        return v if isinstance(v, str) else f"ERR:TYPE:string:{type(v).__name__}"
+    return v
+
+
+def _to_finite_float(v):
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError(f"non_finite:{f!r}")
+    return f
+
+
+def _to_int_checked(v):
+    if isinstance(v, bool):
+        return int(v)
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError(f"non_finite:{f!r}")
+    r = round(f)
+    if abs(f - r) > _INT_TOL:
+        raise ValueError(f"fractional:{f!r}")
+    return int(r)
+
+
+def _to_bool_from_str(v):
+    s = v.strip().lower()
+    if s in ("true", "1", "yes"):
+        return True
+    if s in ("false", "0", "no"):
+        return False
+    raise ValueError(f"bad_bool:{v!r}")
+
+
+def _to_bool_from_num(v):
+    f = float(v)
+    if f == 0.0:
+        return False
+    if f == 1.0:
+        return True
+    raise ValueError(f"non_bool_numeric:{f!r}")
+
+
+# =============================================================================
+# Drivers
 # =============================================================================
 class PlcDriver(abc.ABC):
     @abc.abstractmethod
@@ -133,6 +231,10 @@ class PlcDriver(abc.ABC):
     def read(self, addrs): ...
     @abc.abstractmethod
     def write(self, values): ...
+    def set_signal_types(self, types):
+        pass
+    def get_server_types(self):
+        return None
     def close(self):
         pass
 
@@ -147,6 +249,10 @@ class TcpJsonDriver(PlcDriver):
         self._last_seq = 0
         self._last_sock_ms = 0.0
         self._last_parse_ms = 0.0
+        self.types = {}
+
+    def set_signal_types(self, types):
+        self.types = dict(types)
 
     def connect(self):
         self.close()
@@ -161,15 +267,20 @@ class TcpJsonDriver(PlcDriver):
         self.buf = b""
         self._last_seq = 0
 
+    @staticmethod
+    def _reject_constant(name):
+        raise ValueError(f"non-finite constant from PLC: {name}")
+
     def _request(self, req):
-        self.sock.sendall((json.dumps(req) + "\n").encode())
+        self.sock.sendall((json.dumps(req, allow_nan=False) + "\n").encode())
         while b"\n" not in self.buf:
             chunk = self.sock.recv(4096)
             if not chunk:
                 raise ConnectionError("server closed the connection")
             self.buf += chunk
         line, self.buf = self.buf.split(b"\n", 1)
-        resp = json.loads(line.decode("utf-8"))
+        resp = json.loads(line.decode("utf-8"),
+                          parse_constant=self._reject_constant)
 
         seq = resp.get("seq")
         if seq is not None:
@@ -195,7 +306,10 @@ class TcpJsonDriver(PlcDriver):
         out = {}
         for a in read_addrs:
             v = resp.get("values", {}).get(a)
-            out[a] = None if isinstance(v, str) and v.startswith("ERR:") else v
+            if isinstance(v, str) and v.startswith("ERR:"):
+                out[a] = v
+            else:
+                out[a] = _wire_type_check(self.types.get(a), v)
 
         failed = []
         if write_values:
@@ -216,7 +330,10 @@ class TcpJsonDriver(PlcDriver):
         out = {}
         for a in addrs:
             v = resp["values"].get(a)
-            out[a] = None if isinstance(v, str) and v.startswith("ERR:") else v
+            if isinstance(v, str) and v.startswith("ERR:"):
+                out[a] = v
+            else:
+                out[a] = _wire_type_check(self.types.get(a), v)
         t2 = time.perf_counter()
         self._last_sock_ms = (t1 - t0) * 1000.0
         self._last_parse_ms = (t2 - t1) * 1000.0
@@ -227,6 +344,20 @@ class TcpJsonDriver(PlcDriver):
         if "written" not in resp:
             raise RuntimeError(f"bad write reply: {resp}")
         return [a for a in values if not resp["written"].get(a, False)]
+
+    def get_server_types(self):
+        try:
+            resp = self._request({"cmd": "types"})
+        except Exception:
+            return None
+        if "error" in resp:
+            return None
+        out = {}
+        for k, v in resp.get("types", {}).items():
+            out[k] = _SERVER_TYPE_MAP.get(v, v)
+        for k, v in resp.get("arrays", {}).items():
+            out[k] = _SERVER_TYPE_MAP.get(v, v)
+        return out
 
     def close(self):
         try:
@@ -337,14 +468,15 @@ class OpcUaDriver(PlcDriver):
                 t1 = time.perf_counter()
                 self._last_sock_ms = (t1 - t0) * 1000.0
                 self._last_parse_ms = 0.0
-                return out
+                return {a: _wire_type_check(self.types.get(a), v)
+                        for a, v in out.items()}
 
             out = {}
             for a, v in zip(addrs, values):
                 try:
                     if hasattr(v, "tolist"):
                         v = v.tolist()
-                    out[a] = v
+                    out[a] = _wire_type_check(self.types.get(a), v)
                 except Exception:
                     out[a] = None
         t1 = time.perf_counter()
@@ -394,16 +526,20 @@ class OpcUaDriver(PlcDriver):
                             )
                         except Exception:
                             failed.append(a)
-
             return failed
 
 
 class PlcApiDriver(PlcDriver):
     def __init__(self, cfg):
-        self.instance_name = cfg.instance if cfg.instance else "ros2_"
+        # v4.0: default matches plc_server_win.py's default
+        self.instance_name = cfg.instance if cfg.instance else "296"
         self.instance = None
+        self.types = {}
         self._last_sock_ms = 0.0
         self._last_parse_ms = 0.0
+
+    def set_signal_types(self, types):
+        self.types = dict(types)
 
     def connect(self):
         import clr
@@ -454,7 +590,7 @@ class PlcApiDriver(PlcDriver):
         out = {}
         for a in addrs:
             try:
-                out[a] = self._read_one(a)
+                v = self._read_one(a)
             except Exception:
                 try:
                     elems = []
@@ -463,9 +599,10 @@ class PlcApiDriver(PlcDriver):
                             elems.append(self._read_one(f"{a}[{i}]"))
                         except Exception:
                             break
-                    out[a] = elems if elems else None
+                    v = elems if elems else None
                 except Exception:
-                    out[a] = None
+                    v = None
+            out[a] = _wire_type_check(self.types.get(a), v)
         t1 = time.perf_counter()
         self._last_sock_ms = (t1 - t0) * 1000.0
         self._last_parse_ms = 0.0
@@ -557,20 +694,29 @@ class PlcRosBridge(Node):
                 )
             return f'{db}.{raw}'
 
+        # v4.0: strict types default True
+        self.strict_types = bool(getattr(self.cfg, "strict_types", True))
+
         self.sig = {}
         for name, s in self.cfg.signals.items():
             self.sig[name] = {
                 "addr": make_addr(s.addr),
                 "type": s.type,
                 "dir":  s.dir,
+                "min":  getattr(s, "min", None),
+                "max":  getattr(s, "max", None),
+                "strict": getattr(s, "strict", None),
+                "reject_non_finite": bool(getattr(s, "reject_non_finite", True)),
+                "allow_int_for_float": bool(getattr(s, "allow_int_for_float", True)),
             }
         self.read_names = [n for n, s in self.sig.items() if s["dir"] == "read"]
         self._read_addrs = [self.sig[n]["addr"] for n in self.read_names]
 
-        if hasattr(self.driver, "set_signal_types"):
-            self.driver.set_signal_types({
-                s["addr"]: s["type"] for s in self.sig.values()
-            })
+        # v4.0: wire-level type check + per-signal counters
+        self.driver.set_signal_types(
+            {s["addr"]: s["type"] for s in self.sig.values()}
+        )
+        self._stats = defaultdict(lambda: defaultdict(int))
 
         robot = self.cfg.robot
         self.joints  = robot.joints
@@ -623,8 +769,13 @@ class PlcRosBridge(Node):
 
         self._last_tick_end_ns = None
         self._last_written_act_ang = None
+        self._last_act_write_t = 0.0
+        # Several threads publish /plc/emergency_stop (I/O + watchdog):
+        # serialise those calls. The watchdog never waits long.
+        self._estop_lock = threading.Lock()
+        self._deadline_miss = 0
+        self._max_overrun_ms = 0.0
 
-        # Pipelining: ONLY hb_ack is genuinely pipeline-bound.
         self._pending_writes = {}
         self._pending_ack = None
 
@@ -686,12 +837,13 @@ class PlcRosBridge(Node):
 
         self.log.info(
             "bridge_started",
-            extra={"driver": driver_name, "poll_hz": poll_hz},
+            extra={"driver": driver_name, "poll_hz": poll_hz,
+                   "strict_types": self.strict_types},
         )
 
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
     # Callbacks
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
     def on_joint_states(self, msg):
         with self._js_lock:
             if self._probe is not None:
@@ -714,6 +866,7 @@ class PlcRosBridge(Node):
             self._last_pub.clear()
             self._last_cmd_ang = None
             self._last_written_act_ang = None
+            self._last_act_write_t = 0.0
             self._pending_writes = {}
             self._pending_ack = None
             self._js_tag = ""
@@ -725,18 +878,47 @@ class PlcRosBridge(Node):
             if self._estop_from_plc:
                 self.log.info("plc_reconnected_estop_from_plc")
             else:
-                self.pub_estop.publish(Bool(data=False))
+                self._publish_estop(False)
                 self.log.info("plc_reconnected_estop_cleared")
         else:
             self.log.warning(
                 "plc_disconnected",
                 extra={"driver": self.driver_name},
             )
-            self.pub_estop.publish(Bool(data=True))
+            self._publish_estop(True)
             self._last_pub["/plc/emergency_stop"] = True
             self.log.warning("plc_lost_estop_published")
         self.connected = state
         self.pub_conn.publish(Bool(data=state))
+
+    def _run_type_handshake(self):
+        """Compare config types with server-declared types. Return False to abort."""
+        if not hasattr(self.driver, "get_server_types"):
+            return True
+        try:
+            server_types = self.driver.get_server_types()
+        except Exception as e:
+            self.log.warning("type_handshake_failed", extra={"error": str(e)})
+            return True
+        if not server_types:
+            self.log.info("type_handshake_unavailable",
+                          extra={"driver": self.driver_name})
+            return True
+        mismatch = {}
+        for name, s in self.sig.items():
+            st = server_types.get(s["addr"])
+            if st is not None and st != s["type"]:
+                mismatch[name] = {"addr": s["addr"],
+                                  "config": s["type"], "server": st}
+        if not mismatch:
+            self.log.info("type_handshake_ok",
+                          extra={"checked": len(server_types)})
+            return True
+        self.log.error("config_type_mismatch", extra={"mismatch": mismatch})
+        if getattr(self.cfg, "strict_type_handshake", False):
+            self.log.fatal("type_handshake_aborting")
+            return False
+        return True
 
     def _try_connect(self):
         now = time.monotonic()
@@ -753,62 +935,169 @@ class PlcRosBridge(Node):
             self._set_connected(False)
             self._backoff = min(self._backoff * 2.0, self._backoff_max)
             return False
+        if not self._run_type_handshake():
+            try:
+                self.driver.close()
+            except Exception:
+                pass
+            self._backoff = min(self._backoff * 2.0, self._backoff_max)
+            return False
         self._backoff = self._backoff_min
         self._last_ack = None
         self._set_connected(True)
         return True
 
+    # ------------------------------------------------------------------ #
+    # v4.0: validation
+    # ------------------------------------------------------------------ #
+    def _bump(self, name, reason):
+        key = reason.split(":", 1)[0] if isinstance(reason, str) else str(reason)
+        if not key:
+            key = "bad_value"
+        self._stats[name][key] += 1
+        self._stats[name]["rejected_total"] += 1
+
+    def _range_check(self, s, v):
+        lo, hi = s.get("min"), s.get("max")
+        if lo is not None and v < lo:
+            raise ValueError(f"below_min:{v}")
+        if hi is not None and v > hi:
+            raise ValueError(f"above_max:{v}")
+
+    def _validate(self, s, v):
+        if v is None:
+            raise ValueError("no_value")
+        if isinstance(v, str):
+            if v.startswith("ERR:"):
+                raise ValueError(v)
+            if s["type"] == "string":
+                return v
+            raise ValueError(f"expected_{s['type']}:str")
+
+        if isinstance(v, (list, tuple)):
+            return self._validate_array(s, v)
+
+        t = s["type"]
+        if t == "float":
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"expected_float:{type(v).__name__}")
+            if isinstance(v, int) and not s.get("allow_int_for_float", True):
+                raise ValueError("expected_float:int_disallowed")
+            f = float(v)
+            if s.get("reject_non_finite", True) and not math.isfinite(f):
+                raise ValueError("non_finite")
+            self._range_check(s, f)
+            return f
+        if t == "int":
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise ValueError(f"expected_int:{type(v).__name__}")
+            self._range_check(s, v)
+            return v
+        if t == "bool":
+            if not isinstance(v, bool):
+                raise ValueError(f"expected_bool:{type(v).__name__}")
+            return v
+        raise ValueError(f"unknown_type:{t}")
+
+    def _validate_array(self, s, v):
+        t = s["type"]
+        out = []
+        for x in v:
+            if t == "float":
+                if isinstance(x, bool) or not isinstance(x, (int, float)):
+                    raise ValueError(f"expected_float_elem:{type(x).__name__}")
+                if isinstance(x, int) and not s.get("allow_int_for_float", True):
+                    raise ValueError("expected_float_elem:int_disallowed")
+                f = float(x)
+                if s.get("reject_non_finite", True) and not math.isfinite(f):
+                    raise ValueError("non_finite_elem")
+                self._range_check(s, f)
+                out.append(f)
+            elif t == "int":
+                if isinstance(x, bool) or not isinstance(x, int):
+                    raise ValueError(f"expected_int_elem:{type(x).__name__}")
+                self._range_check(s, x)
+                out.append(x)
+            elif t == "bool":
+                if not isinstance(x, bool):
+                    raise ValueError(f"expected_bool_elem:{type(x).__name__}")
+                out.append(x)
+            elif t == "string":
+                if not isinstance(x, str):
+                    raise ValueError(f"expected_string_elem:{type(x).__name__}")
+                out.append(x)
+            else:
+                raise ValueError(f"unknown_type_array:{t}")
+        return out
+
+    def _coerce_legacy(self, s, v):
+        """v3.7 behaviour, but with NaN/Inf and int-truncation guards."""
+        if v is None:
+            raise ValueError("no_value")
+        if isinstance(v, (list, tuple)):
+            if s["type"] == "int":
+                return [_to_int_checked(x) for x in v]
+            return [_to_finite_float(x) for x in v]
+        if isinstance(v, str):
+            if v.startswith("ERR:"):
+                raise ValueError(v)
+            if s["type"] == "float":
+                return _to_finite_float(v)
+            if s["type"] == "int":
+                return _to_int_checked(v)
+            if s["type"] == "bool":
+                return _to_bool_from_str(v)
+            return v
+        if s["type"] == "float":
+            return _to_finite_float(v)
+        if s["type"] == "int":
+            return _to_int_checked(v)
+        if s["type"] == "bool":
+            return _to_bool_from_num(v)
+        return str(v)
+
     def _get(self, name, raw):
         s = self.sig[name]
         v = raw.get(s["addr"])
+        strict = s.get("strict")
+        if strict is None:
+            strict = self.strict_types
         try:
-            if v is None:
-                raise ValueError("no value")
-            if isinstance(v, (list, tuple)):
-                return [float(x) for x in v]
-            if isinstance(v, str):
-                if v.startswith("ERR:"):
-                    raise ValueError(v)
-                if s["type"] == "float":
-                    return float(v)
-                if s["type"] == "int":
-                    return int(v)
-                if s["type"] == "bool":
-                    return v.lower() in ("true", "1", "yes")
-                return v
-            return CAST[s["type"]](v)
+            result = self._validate(s, v) if strict else self._coerce_legacy(s, v)
         except (TypeError, ValueError) as e:
+            reason = str(e.args[0]) if e.args else "bad_value"
+            self._bump(name, reason)
             now = time.monotonic()
-            last = self._warned.get(name, 0.0)
-            if now - last > self._warn_cooldown:
+            if now - self._warned.get(name, 0.0) > self._warn_cooldown:
                 self._warned[name] = now
                 self.log.warning(
-                    "signal_bad_value",
+                    "signal_rejected",
                     extra={
                         "signal": name,
                         "addr": s["addr"],
                         "value": repr(v),
-                        "error": str(e),
+                        "reason": reason,
+                        "counts": dict(self._stats[name]),
                     },
                 )
             return None
+        self._stats[name]["good"] += 1
+        return result
 
-    # --------------------------------------------------------------------- #
-    # tick() — v3.6/v3.7
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------ #
+    # tick()
+    # ------------------------------------------------------------------ #
     def tick(self):
         if not self.connected and not self._try_connect():
             return
         tick_id = int(time.monotonic() * 1000) % 1000000
         t_rs = time.monotonic_ns()
         try:
-            # ---- 1. Take the pipelined hb_ack (only) from PREVIOUS tick --
             writes_to_send = self._pending_writes
             ack_to_send = self._pending_ack
             self._pending_writes = {}
             self._pending_ack = None
 
-            # ---- 2. Prepare act_ang / cmd_ack / feedback_valid NOW -------
             probe_tag, probe_recv = "", 0
             act_written = False
             with self._js_lock:
@@ -817,44 +1106,43 @@ class PlcRosBridge(Node):
                     and self._last_js_t > 0
                     and (time.monotonic() - self._last_js_t) <= JS_STALE_AGE_S
                 )
-                if self.act_ang and js_fresh:
-                    probe_tag, probe_recv = self._js_tag, self._js_recv_ns
-
-                    ang_deg = [math.degrees(float(x)) for x in self._js_rad]
-
-                    needs_write = (
-                        self._last_written_act_ang is None
-                        or any(abs(n - o) > ACT_ANG_DEADBAND_DEG
-                               for n, o in zip(ang_deg, self._last_written_act_ang))
-                    )
-                    if needs_write:
-                        if len(self.act_ang) == 1:
-                            sig = self.act_ang[0]
-                            writes_to_send[self.sig[sig]["addr"]] = ang_deg
+                if self.act_ang:
+                    if js_fresh:
+                        ang_deg = [math.degrees(float(x)) for x in self._js_rad]
+                        # v4.0: NaN/Inf guard (defense in depth)
+                        if not all(math.isfinite(a) for a in ang_deg):
+                            self._bump("__act_ang__", "non_finite")
+                            self.log.error(
+                                "joint_angles_non_finite",
+                                extra={"ang": ang_deg},
+                            )
+                            js_fresh = False
+                    if js_fresh:
+                        probe_tag, probe_recv = self._js_tag, self._js_recv_ns
+                        needs_write = self._act_ang_needs_write(
+                            ang_deg, time.monotonic())
+                        if needs_write:
+                            if len(self.act_ang) == 1:
+                                sig = self.act_ang[0]
+                                writes_to_send[self.sig[sig]["addr"]] = ang_deg
+                            else:
+                                for sig, deg in zip(self.act_ang, ang_deg):
+                                    writes_to_send[self.sig[sig]["addr"]] = deg
+                            self._act_ang_mark_written(ang_deg, time.monotonic())
+                            act_written = True
+                            self._js_tag = ""
                         else:
-                            for sig, deg in zip(self.act_ang, ang_deg):
-                                writes_to_send[self.sig[sig]["addr"]] = deg
-                        self._last_written_act_ang = ang_deg
-                        act_written = True
-                        # Consume the tag ONLY when act_ang is written.
-                        self._js_tag = ""
+                            act_written = False
+                        if self.cmd_ack:
+                            writes_to_send[self.sig[self.cmd_ack]["addr"]] = True
+                        if self.feedback_valid:
+                            writes_to_send[self.sig[self.feedback_valid]["addr"]] = True
                     else:
-                        # Do NOT consume the tag; keep for the next tick
-                        # that will actually write. This is the v3.6 fix
-                        # for probe starvation.
-                        act_written = False
+                        if self.cmd_ack:
+                            writes_to_send[self.sig[self.cmd_ack]["addr"]] = False
+                        if self.feedback_valid:
+                            writes_to_send[self.sig[self.feedback_valid]["addr"]] = False
 
-                    if self.cmd_ack:
-                        writes_to_send[self.sig[self.cmd_ack]["addr"]] = True
-                    if self.feedback_valid:
-                        writes_to_send[self.sig[self.feedback_valid]["addr"]] = True
-                elif self.act_ang and not js_fresh:
-                    if self.cmd_ack:
-                        writes_to_send[self.sig[self.cmd_ack]["addr"]] = False
-                    if self.feedback_valid:
-                        writes_to_send[self.sig[self.feedback_valid]["addr"]] = False
-
-            # ---- 3. Single RTT: read + write ------------------------------
             if self.driver_name == "tcp_json" and hasattr(self.driver, "sync"):
                 raw, failed = self.driver.sync(self._read_addrs, writes_to_send)
             else:
@@ -886,22 +1174,20 @@ class PlcRosBridge(Node):
                 self._last_pub.clear()
                 self._watchdog_fired = False
 
-            # ---- 4. Handle write result -----------------------------------
             if writes_to_send:
                 if not failed:
                     if act_written and probe_tag:
                         if (t_rd - probe_recv) <= PROBE_MAX_AGE_NS:
-                            hb_val = (
-                                vals.get(self.hb_counter)
-                                if self.hb_counter else None
-                            )
-                            self._probe.record(
-                                probe_tag, probe_recv, t_rd,
-                                int(hb_val) if hb_val is not None else 0,
-                            )
+                            hb_val = (vals.get(self.hb_counter)
+                                      if self.hb_counter else None)
+                            # v4.0: -1 marks "rejected/unavailable" (real counters
+                            # are never negative).
+                            hb_out = int(hb_val) if isinstance(hb_val, int) else -1
+                            self._probe.record(probe_tag, probe_recv, t_rd, hb_out)
                     if ack_to_send is not None:
                         self._last_ack = ack_to_send
                 else:
+                    self._act_ang_write_failed()
                     for a in failed:
                         self.log.warning(
                             "write_failed",
@@ -910,7 +1196,6 @@ class PlcRosBridge(Node):
 
             self._publish(vals, t_rs, t_rd)
 
-            # ---- 5. Prepare hb_ack for NEXT tick (pipelined) --------------
             if self.hb_counter and self.hb_ack:
                 hb = vals.get(self.hb_counter)
                 if hb is not None and hb != self._last_ack:
@@ -929,6 +1214,7 @@ class PlcRosBridge(Node):
                         "ticks": self._tick_count,
                         "rate_hz": self._measured_rate_hz(),
                         **self._probe_stats(),
+                        **self._deadline_stats(),
                         "slow": self._slow_count,
                         "slow_pct": round(
                             100.0 * self._slow_count / self._tick_count, 2),
@@ -975,7 +1261,11 @@ class PlcRosBridge(Node):
             if self._last_pub.get(key) == cast_v:
                 continue
             self._last_pub[key] = cast_v
-            pub.publish(MSG_TYPES[p.type](data=cast_v))
+            msg = MSG_TYPES[p.type](data=cast_v)
+            if pub is self.pub_estop:
+                self._pub_locked(pub, msg)
+            else:
+                pub.publish(msg)
 
         if self.pub_cmd_ang:
             ang = []
@@ -1001,20 +1291,58 @@ class PlcRosBridge(Node):
                 self._probe_sent += 1
             self.pub_cmd_ang.publish(js)
 
+    def _pub_locked(self, pub, msg):
+        got = self._estop_lock.acquire(timeout=0.2)
+        try:
+            pub.publish(msg)
+        finally:
+            if got:
+                self._estop_lock.release()
+
+    def _publish_estop(self, value):
+        self._pub_locked(self.pub_estop, Bool(data=bool(value)))
+
+    def _act_ang_needs_write(self, ang_deg, now):
+        last = self._last_written_act_ang
+        if last is None:
+            return True
+        if now - self._last_act_write_t >= ACT_ANG_REFRESH_S:
+            return True
+        return any(abs(n - o) > ACT_ANG_DEADBAND_DEG
+                   for n, o in zip(ang_deg, last))
+
+    def _act_ang_mark_written(self, ang_deg, now):
+        self._last_written_act_ang = ang_deg
+        self._last_act_write_t = now
+
+    def _act_ang_write_failed(self):
+        self._last_written_act_ang = None
+        self._last_act_write_t = 0.0
+
+    def _deadline_stats(self):
+        out = {"deadline_miss": self._deadline_miss,
+               "max_overrun_ms": round(self._max_overrun_ms, 1)}
+        self._max_overrun_ms = 0.0
+        return out
+
     def _probe_stats(self):
+        out = {}
         p = self._probe
-        if p is None:
-            return {}
-        # v3.7: expose both bridge-authored tags (probe_sent) and all
-        # record() attempts (probe_attempted) so tests can distinguish
-        # "bridge didn't publish" from "tag arrived but was rejected".
-        return {
-            "probe_sent": self._probe_sent,
-            "probe_attempted": p.attempted,
-            "probe_rows": p.rows,
-            "probe_rejected": p.rejected,
-            "probe_order_violations": p.order_violations,
-        }
+        if p is not None:
+            out["probe_sent"] = self._probe_sent
+            out["probe_attempted"] = p.attempted
+            out["probe_rows"] = p.rows
+            out["probe_rejected"] = p.rejected
+            out["probe_order_violations"] = p.order_violations
+        total_rej = sum(c.get("rejected_total", 0) for c in self._stats.values())
+        if total_rej > 0:
+            out["signal_rejections_total"] = total_rej
+            out["signal_rejections"] = {
+                name: {k: v for k, v in c.items() if k != "good"}
+                for name, c in self._stats.items()
+                if c.get("rejected_total", 0) > 0
+            }
+        return out
 
     def _measured_rate_hz(self):
         now = time.monotonic()
@@ -1033,11 +1361,16 @@ class PlcRosBridge(Node):
                 except Exception:
                     pass
             next_t += self._poll_period
-            delay = next_t - time.monotonic()
+            now = time.monotonic()
+            delay = next_t - now
             if delay > 0:
                 self._io_stop.wait(delay)
             else:
-                next_t = time.monotonic()
+                self._deadline_miss += 1
+                overrun_ms = -delay * 1000.0
+                if overrun_ms > self._max_overrun_ms:
+                    self._max_overrun_ms = overrun_ms
+                next_t = now
 
     def _watchdog_loop(self):
         while not self._watchdog_stop.wait(0.5):
@@ -1055,7 +1388,7 @@ class PlcRosBridge(Node):
             stalled = round(now - self._last_tick_ok, 2)
             self.log.error("watchdog_tick_stalled",
                            extra={"stalled_s": stalled})
-            self.pub_estop.publish(Bool(data=True))
+            self._publish_estop(True)
             self._last_pub["/plc/emergency_stop"] = True
             self._watchdog_fired = True
 
@@ -1072,6 +1405,9 @@ class PlcRosBridge(Node):
                  f"{time.monotonic() - self._last_tick_ok:.2f}")
         stat.add("config_hash", self._cfg_hash[:12] + "…")
         stat.add("schema_version", self.cfg.schema_version)
+        stat.add("strict_types", str(self.strict_types))
+        total_rej = sum(c.get("rejected_total", 0) for c in self._stats.values())
+        stat.add("signal_rejections_total", str(total_rej))
         return stat
 
     def destroy_node(self):

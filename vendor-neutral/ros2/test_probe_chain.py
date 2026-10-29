@@ -37,6 +37,25 @@ def _load_probe():
     return ns["_LatencyProbe"]
 
 
+def _bind_physics_v4_helpers(me):
+    """v4.0: bind _bump / _warn / _check_finite to a PhysicsTwin mock.
+
+    physics_twin.publish_states now calls self._check_finite() before
+    publishing, and self._bump()/self._warn() on rejection. These are
+    defined on the real class; tests use SimpleNamespace, so we bind
+    them explicitly.
+    """
+    from collections import defaultdict
+    me._stats = defaultdict(lambda: defaultdict(int))
+    me._warned = {}
+    me._warn_cooldown = 5.0
+    for m in ("_bump", "_warn", "_check_finite"):
+        src = _extract("physics_twin.py", "PhysicsTwin", m)
+        local = {"np": np, "time": time}
+        exec(src, local)
+        setattr(me, m, local[m].__get__(me))
+
+
 # Full 7-part tag (physics already appended js_pub)
 T = [1000 + 10 * i for i in range(8)] + [0]
 
@@ -185,6 +204,8 @@ def _physics_publish(last_sp_age_s):
         _current_isaac=np.zeros(1, dtype=np.float32),
         _velocity_isaac=np.zeros(1, dtype=np.float32),
     )
+
+    _bind_physics_v4_helpers(me)
     return ns["publish_states"], me, sent
 
 
@@ -206,9 +227,32 @@ def test_physics_drops_tag_after_timeout():
     assert me._applied_tag == ""
 
 
+def test_physics_refuses_non_finite_joint_states():
+    """v4.0: publish_states must not publish when positions are non-finite."""
+    publish, me, sent = _physics_publish(0.01)
+    me.robot.get_joint_positions = lambda: [np.array([float("nan")],
+                                                    dtype=np.float32)]
+    publish(me)
+    assert sent == []
+    assert me._stats["__joint_states__"]["pos_non_finite"] >= 1
+
+
 # ---------------------------------------------------------------------------
 # trajectory_twin._publish
 # ---------------------------------------------------------------------------
+def _bind_traj_v4_helpers(me):
+    """v4.0: bind _bump / _warn to a TrajectoryTwin mock."""
+    from collections import defaultdict
+    me._stats = defaultdict(lambda: defaultdict(int))
+    me._warned = {}
+    me._warn_cooldown = 5.0
+    for m in ("_bump", "_warn"):
+        src = _extract("trajectory_twin.py", "TrajectoryTwin", m)
+        local = {"time": time}
+        exec(src, local)
+        setattr(me, m, local[m].__get__(me))
+
+
 def test_trajectory_publish_keeps_6_part_tag():
     fn = _extract("trajectory_twin.py", "TrajectoryTwin", "_publish")
     import threading
@@ -249,10 +293,58 @@ def test_trajectory_publish_keeps_6_part_tag():
         _cmd_tag=tag6(),
         _cmd_tag_t=12345.0,
     )
+    _bind_traj_v4_helpers(me)
     ns["_publish"](me, [0.5], tag6(), 12345.0)
     assert sent[0].startswith(tag6() + ";")
     # traj: input tag has 6 parts (5 ";" ), traj appends 1 → 6 ";" / 7 parts
     assert sent[0].count(";") == 6
+
+
+def test_trajectory_publish_rejects_non_finite_positions():
+    """v4.0: _publish must not emit /servo_setpoints with NaN/Inf."""
+    fn = _extract("trajectory_twin.py", "TrajectoryTwin", "_publish")
+    import threading
+    ns = {"time": time, "math": __import__("math")}
+    exec(fn, ns)
+
+    sent = []
+
+    class Pub:
+        def publish(self, m): sent.append(m.header.frame_id)
+
+    class Hdr:
+        stamp = None
+        frame_id = ""
+
+    class Msg:
+        def __init__(self):
+            self.header = Hdr()
+            self.position = [0.0]
+
+    class Clock:
+        def now(self):
+            return types.SimpleNamespace(to_msg=lambda: None)
+
+    class Logger:
+        def info(self, *a, **k): pass
+
+    me = types.SimpleNamespace(
+        _msg=Msg(),
+        get_clock=lambda: Clock(),
+        log=Logger(),
+        setpoint_pub=Pub(),
+        _last_setpoint_log=time.monotonic(),
+        ctrl_indices=[0],
+        all_dof=1,
+        controlled_joints=["j1"],
+        lock=threading.Lock(),
+        _cmd_tag=tag6(),
+        _cmd_tag_t=12345.0,
+    )
+    _bind_traj_v4_helpers(me)
+    ns["_publish"](me, [float("nan")], tag6(), 12345.0)
+    assert sent == []
+    assert me._stats["__publish__"]["non_finite"] >= 1
 
 
 # ---------------------------------------------------------------------------

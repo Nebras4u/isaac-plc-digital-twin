@@ -1,7 +1,6 @@
-# plc_ros_bridge.yaml
-# Schema v2.0 — see bridge_config.py for the canonical definition.
+# plc_ros_bridge.yaml — PRODUCTION v4.0 (schema 2.2)
 
-schema_version: "2.0"
+schema_version: "2.2"
 
 plc:
   driver: tcp_json
@@ -19,20 +18,29 @@ signals:
     addr: "MainRobotLeft_CmdAng"
     type: float
     dir: read
+    min: -360.0
+    max: 360.0
 
   act_ang:
     addr: "MainRobotLeft_ActAng"
     type: float
     dir: write
+    min: -360.0
+    max: 360.0
 
   hb_counter:
     addr: "Heartbeat_Counter"
     type: int
     dir: read
+    min: 0
+    max: 2147483647
+
   hb_ack:
     addr: "ROS_Ack_Counter"
     type: int
     dir: write
+    min: 0
+    max: 2147483647
 
   cmd_ack:
     addr: "MainRobotLeft_CmdAck"
@@ -43,14 +51,18 @@ signals:
     addr: "MainRobotLeft_CmdEnable"
     type: bool
     dir: read
+
   estop:
     addr: "MainRobotLeft_Emergency_Stop_Active"
     type: bool
     dir: read
+
   velocity_scale:
     addr: "MainRobotLeft_Vlcty"
     type: float
     dir: read
+    min: 0.0
+    max: 1000.0
 
 robot:
   joints: [joint_1, joint_2, joint_3, joint_4]
@@ -64,9 +76,6 @@ heartbeat:
   counter: hb_counter
   ack: hb_ack
 
-# estop MUST be here: this is how the PLC E-stop reaches ROS.
-# The bridge reuses this publisher for its own estop events
-# (_set_connected, _check_watchdog), so there is only ONE writer.
 publish:
   - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
   - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
@@ -76,6 +85,9 @@ poll_hz: 200
 watchdog_timeout: 4.0
 backoff_max: 30.0
 warn_cooldown: 60.0
+
+strict_types: true
+strict_type_handshake: true
 
 latency_probe: true
 latency_probe_file: "/tmp/plc_latency.csv"

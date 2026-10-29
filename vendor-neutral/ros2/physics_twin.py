@@ -1,0 +1,573 @@
+# physics_twin.py
+# Isaac Sim physics executor — vendor-neutral.
+# Reads robot definition from robot.yaml (ROS parameter "robot_cfg").
+#
+# Gravity: kept ENABLED. Compensation via high drive stiffness in robot.yaml.
+#
+# Safety model:
+#   * Setpoint older than `setpoint_timeout_s` → HOLD last valid target.
+#   * /plc/emergency_stop = True              → HOLD current position.
+#
+# v4.0 — industrial type-safety (mirrors plc_ros_bridge.py v4.0):
+#   * NaN/Inf rejection at ALL boundaries (non-negotiable, no opt-out):
+#       - on_setpoint : non-finite positions dropped per-joint;
+#         name/position length mismatch rejects the whole message.
+#       - _seed/_refresh : refuses non-finite joint state from Isaac
+#         (prevents contaminating the E-stop hold position).
+#       - publish_states : /joint_states is not published if any
+#         position or velocity component is non-finite.
+#   * Per-reason rejection counters (`_stats`), surfaced in the 10-s
+#     status log and in throttled warnings.
+#   * Optional joint-limit checking against Isaac RevoluteJoint limits
+#     (default: warn only; `enforce_joint_limits=True` rejects).
+#
+# v3.6 changes (unchanged):
+#   * [G] _applied_tag is NOT cleared on every publish.
+#   * [H] Only the tag chain's ORIGINAL command origin is preserved.
+
+import asyncio
+import math
+import sys
+import time
+from collections import defaultdict
+
+import numpy as np
+import yaml
+
+import omni.kit.app
+import omni.usd
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import (
+    QoSProfile, HistoryPolicy, ReliabilityPolicy, DurabilityPolicy,
+)
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
+
+from isaacsim.core.prims import Articulation
+from pxr import UsdPhysics
+
+import os as _os
+_SCRIPT_DIR = _os.path.dirname(_os.path.abspath(__file__))
+for _p in (_SCRIPT_DIR, '/workspace'):
+    if _os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+del _os, _SCRIPT_DIR, _p
+
+from joint_mapper import JointMapper
+
+
+DEFAULT_ROBOT_CFG       = "/workspace/robot.yaml"
+DEFAULT_PUBLISH_HZ      = 120.0
+DEFAULT_TIMEOUT_S       = 0.5
+DEFAULT_WARN_COOLDOWN_S = 5.0
+TAG_VALID_S             = 0.5
+REINIT_BACKOFF_S        = 1.0
+STATUS_LOG_PERIOD_S     = 10.0
+MAX_MSG_PER_FRAME       = 8
+
+
+def load_robot_cfg(path: str) -> dict:
+    with open(path) as f:
+        loaded = yaml.safe_load(f)
+    if loaded is None:
+        raise ValueError(f"robot.yaml is empty: {path}")
+    if "robot" not in loaded:
+        raise KeyError(f"robot.yaml missing 'robot:' key")
+    cfg = loaded["robot"]
+    for k in ("isaac_path", "isaac_scope", "all_joints", "drives", "joint_paths"):
+        if k not in cfg:
+            raise KeyError(f"robot.yaml missing robot.{k}")
+    return cfg
+
+
+def inspect_limits(joint_paths: dict) -> dict:
+    """Print and return {joint_name: (lo, hi)} for revolute joints."""
+    stage = omni.usd.get_context().get_stage()
+    print("=" * 60)
+    print("Joint limits:")
+    limits = {}
+    for name, path in joint_paths.items():
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            print(f"  {name}: NOT FOUND at {path}")
+            continue
+        joint = UsdPhysics.RevoluteJoint(prim)
+        if joint:
+            lo = joint.GetLowerLimitAttr().Get()
+            hi = joint.GetUpperLimitAttr().Get()
+            print(f"  {name}: [{lo}, {hi}]")
+            if lo is not None and hi is not None:
+                limits[name] = (float(lo), float(hi))
+        else:
+            print(f"  {name}: no RevoluteJoint API")
+    print("=" * 60)
+    return limits
+
+
+def configure_drives(drives: dict, joint_paths: dict):
+    stage = omni.usd.get_context().get_stage()
+    print("Configuring drives...")
+    for joint_name, params in drives.items():
+        path = joint_paths[joint_name]
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            print(f"  [skip] {joint_name}: prim not found")
+            continue
+        drive = UsdPhysics.DriveAPI.Get(prim, "angular")
+        if not drive:
+            print(f"  [skip] {joint_name}: no angular drive API")
+            continue
+        drive.GetStiffnessAttr().Set(float(params["stiffness"]))
+        drive.GetDampingAttr().Set(float(params["damping"]))
+        drive.GetMaxForceAttr().Set(float(params["max_force"]))
+        print(f"  [ok] {joint_name}: K={params['stiffness']:.0f} "
+              f"D={params['damping']:.0f} F={params['max_force']:.0f}")
+
+
+class PhysicsTwin(Node):
+    def __init__(self, robot, mapper, cfg, params, joint_limits=None):
+        super().__init__("physics_twin")
+        self.robot  = robot
+        self.mapper = mapper
+        self.cfg    = cfg
+
+        self.publish_hz = max(1.0, float(params["publish_hz"]))
+        self.timeout_s  = max(0.0, float(params["setpoint_timeout_s"]))
+
+        # v4.0: type-safety state
+        self._warn_cooldown  = float(params.get("warn_cooldown", DEFAULT_WARN_COOLDOWN_S))
+        self._enforce_limits = bool(params.get("enforce_joint_limits", False))
+        self._joint_limits   = dict(joint_limits or {})
+        self._stats          = defaultdict(lambda: defaultdict(int))
+        self._warned         = {}
+        self._known_joints   = set(mapper.dof_order)
+
+        n = mapper.n
+
+        self._latest_setpoint   = None
+        self._last_sp_t         = 0.0
+        self._tag               = ""
+        self._tag_t             = 0.0
+        self._applied_tag       = ""
+        self._applied_tag_t     = 0.0
+        self._fresh_this_frame  = False
+        self._estop_active      = False
+        self._needs_reinit      = False
+        self._last_reinit_t     = 0.0
+        self._last_pub_t        = 0.0
+        self._last_status_log_t = 0.0
+        self._seed_done         = False
+        self._estop_hold_isaac  = None
+
+        self._target_yaml      = np.zeros(n, dtype=np.float32)
+        self._target_isaac     = np.zeros(n, dtype=np.float32)
+        self._last_valid_yaml  = np.zeros(n, dtype=np.float32)
+        self._last_valid_isaac = np.zeros(n, dtype=np.float32)
+        self._current_isaac    = np.zeros(n, dtype=np.float32)
+        self._velocity_isaac   = np.zeros(n, dtype=np.float32)
+        self._joint_indices    = np.arange(n, dtype=np.int32)
+        self._target_isaac_2d  = self._target_isaac.reshape(1, -1)
+
+        self._seed_from_current()
+
+        sp_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.create_subscription(
+            JointState, "/servo_setpoints", self.on_setpoint, sp_qos
+        )
+        estop_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            Bool, "/plc/emergency_stop", self.on_estop, estop_qos
+        )
+
+        js_qos = QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.js_pub = self.create_publisher(JointState, "/joint_states", js_qos)
+
+        self.get_logger().info(
+            f"PhysicsTwin ready. n={n} pub_hz={self.publish_hz} "
+            f"timeout={self.timeout_s}s gravity=ENABLED "
+            f"enforce_limits={self._enforce_limits}"
+        )
+        self.get_logger().info(f"DOF order (YAML) : {mapper.dof_order}")
+        self.get_logger().info(f"DOF order (Isaac): {mapper.isaac_names}")
+
+    # ------------------------------------------------------------------ #
+    # v4.0 validation helpers
+    # ------------------------------------------------------------------ #
+    def _bump(self, name, reason):
+        key = reason.split(":", 1)[0] if isinstance(reason, str) else str(reason)
+        if not key:
+            key = "bad_value"
+        self._stats[name][key] += 1
+        self._stats[name]["rejected_total"] += 1
+
+    def _warn(self, name, message):
+        now = time.monotonic()
+        if now - self._warned.get(name, 0.0) > self._warn_cooldown:
+            self._warned[name] = now
+            counts = dict(self._stats.get(name, {}))
+            self.get_logger().warn(f"{message} [counts={counts}]")
+
+    def _check_finite(self, arr, label):
+        """Return arr if every element is finite; else None (+bump+warn)."""
+        if arr is None:
+            self._bump(label, "none")
+            return None
+        try:
+            mask = np.isfinite(arr)
+            if not mask.all():
+                bad = np.where(~mask)[0]
+                idx = int(bad[0])
+                self._bump(label, "non_finite")
+                self._warn(label, f"{label}[{idx}] non-finite: {arr[idx]!r}")
+                return None
+        except Exception as e:
+            self._bump(label, "check_error")
+            self._warn(label, f"{label} finite check failed: {e}")
+            return None
+        return arr
+
+    def _validate_setpoint(self, msg: JointState):
+        """Return {joint_name: float} of valid entries, or None if unusable."""
+        if len(msg.name) != len(msg.position):
+            self._bump("__setpoint__", "length_mismatch")
+            self._warn("__setpoint__",
+                       f"length mismatch: name={len(msg.name)} "
+                       f"pos={len(msg.position)}")
+            return None
+
+        sp = {}
+        for name, pos in zip(msg.name, msg.position):
+            if name not in self._known_joints:
+                self._bump(name, "unknown_joint")
+                self._warn(name, "unknown joint in setpoint")
+                continue
+            try:
+                f = float(pos)
+            except (TypeError, ValueError):
+                self._bump(name, "bad_type")
+                self._warn(name, f"bad setpoint type: {type(pos).__name__}")
+                continue
+            if not math.isfinite(f):
+                self._bump(name, "non_finite")
+                self._warn(name, f"non-finite setpoint: {f!r}")
+                continue
+            if self._joint_limits:
+                lo, hi = self._joint_limits.get(name, (-math.inf, math.inf))
+                if f < lo or f > hi:
+                    self._bump(name, "below_min" if f < lo else "above_max")
+                    self._warn(name,
+                               f"setpoint {f} outside Isaac limits [{lo},{hi}]")
+                    if self._enforce_limits:
+                        continue
+            sp[name] = f
+
+        if not sp:
+            self._bump("__setpoint__", "all_rejected")
+            return None
+        return sp
+
+    # ------------------------------------------------------------------ #
+    # Callbacks
+    # ------------------------------------------------------------------ #
+    def on_setpoint(self, msg: JointState):
+        if self._estop_active:
+            return
+        sp = self._validate_setpoint(msg)
+        if sp is None:
+            return
+        self._latest_setpoint = sp
+        self._tag              = msg.header.frame_id
+        self._tag_t            = time.monotonic()
+        self._last_sp_t        = self._tag_t
+
+    def on_estop(self, msg: Bool):
+        was = self._estop_active
+        self._estop_active = bool(msg.data)
+        if self._estop_active and not was:
+            self.get_logger().warn("E-Stop ACTIVE — holding current position")
+            self._latest_setpoint = None
+            self._last_sp_t       = 0.0
+            self._tag             = ""
+            self._tag_t           = 0.0
+            self._applied_tag     = ""
+            self._applied_tag_t   = 0.0
+            self._estop_hold_isaac = None
+        elif not self._estop_active and was:
+            self._estop_hold_isaac = None
+            self.get_logger().info("E-Stop CLEARED — awaiting fresh setpoint")
+
+    # ------------------------------------------------------------------ #
+    # Isaac interaction
+    # ------------------------------------------------------------------ #
+    def _seed_from_current(self) -> bool:
+        try:
+            cur = self.robot.get_joint_positions()
+        except Exception as e:
+            print(f"[physics_twin] seed: get_joint_positions failed: {e}")
+            return False
+        if cur is None:
+            return False
+        if self._check_finite(cur[0], "__seed__") is None:
+            self._bump("__seed__", "refused")
+            return False
+        self._last_valid_isaac[:] = cur[0]
+        self._last_valid_yaml[:]  = cur[0][self.mapper.yaml_to_isaac]
+        self._seed_done           = True
+        return True
+
+    def _refresh_current(self) -> bool:
+        try:
+            cur = self.robot.get_joint_positions()
+        except Exception as e:
+            print(f"[physics_twin] Articulation invalid: {e}")
+            self._needs_reinit = True
+            return False
+        if cur is None:
+            return False
+        if self._check_finite(cur[0], "__refresh__") is None:
+            self._bump("__refresh__", "refused")
+            return False
+        self._current_isaac[:] = cur[0]
+        return True
+
+    def _build_target(self) -> bool:
+        self._fresh_this_frame = False
+
+        if self._estop_active:
+            if self._estop_hold_isaac is None:
+                if not self._refresh_current():
+                    return False
+                self._estop_hold_isaac = self._current_isaac.copy()
+                self._last_valid_isaac[:] = self._estop_hold_isaac
+                self._last_valid_yaml[:] = (
+                    self._estop_hold_isaac[self.mapper.yaml_to_isaac])
+                self._seed_done = True
+            self._target_isaac[:] = self._estop_hold_isaac
+            return True
+
+        if self._latest_setpoint is None:
+            if not self._seed_done:
+                if not self._refresh_current():
+                    return False
+                self._last_valid_isaac[:] = self._current_isaac
+                self._last_valid_yaml[:]  = self._current_isaac[self.mapper.yaml_to_isaac]
+                self._seed_done           = True
+            self._target_isaac[:] = self._last_valid_isaac
+            return True
+
+        age = time.monotonic() - self._last_sp_t
+        if age > self.timeout_s:
+            self._target_isaac[:] = self._last_valid_isaac
+            return True
+
+        sp = self._latest_setpoint
+        for j, jname in enumerate(self.mapper.dof_order):
+            v = sp.get(jname)
+            if v is not None:
+                self._target_yaml[j] = v
+            else:
+                self._target_yaml[j] = self._last_valid_yaml[j]
+
+        self._target_isaac[self.mapper.yaml_to_isaac] = self._target_yaml
+        self._last_valid_yaml[:]  = self._target_yaml
+        self._last_valid_isaac[:] = self._target_isaac
+        self._fresh_this_frame    = True
+        return True
+
+    def step(self):
+        if not self._build_target():
+            return
+        try:
+            self.robot.set_joint_position_targets(
+                positions=self._target_isaac_2d,
+                joint_indices=self._joint_indices,
+            )
+        except Exception as e:
+            print(f"[physics_twin] set_joint_position_targets failed: {e}")
+            self._needs_reinit = True
+            return
+        if self._fresh_this_frame:
+            self._applied_tag   = self._tag
+            self._applied_tag_t = self._tag_t
+
+    def publish_states(self):
+        now = time.monotonic()
+        if (now - self._last_pub_t) < (1.0 / self.publish_hz):
+            return
+        self._last_pub_t = now
+
+        try:
+            pos = self.robot.get_joint_positions()
+            vel = self.robot.get_joint_velocities()
+        except Exception as e:
+            print(f"[physics_twin] Articulation invalid in publish_states: {e}")
+            self._needs_reinit = True
+            return
+        if pos is None:
+            return
+
+        # v4.0: refuse to publish /joint_states if any component is non-finite.
+        if self._check_finite(pos[0], "__joint_states_pos__") is None:
+            self._bump("__joint_states__", "pos_non_finite")
+            return
+        if vel is not None:
+            if self._check_finite(vel[0], "__joint_states_vel__") is None:
+                self._bump("__joint_states__", "vel_non_finite")
+                return
+            self._velocity_isaac[:] = vel[0]
+        else:
+            self._velocity_isaac[:] = 0.0
+
+        self._current_isaac[:] = pos[0]
+
+        pos_yaml = self._current_isaac[self.mapper.yaml_to_isaac]
+        vel_yaml = self._velocity_isaac[self.mapper.yaml_to_isaac]
+
+        msg = JointState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.name         = self.mapper.dof_order
+        msg.position     = pos_yaml.tolist()
+        msg.velocity     = vel_yaml.tolist()
+        msg.effort       = []
+
+        tag   = self._applied_tag
+        fresh = (
+            tag
+            and not self._estop_active
+            and (now - self._applied_tag_t) <= TAG_VALID_S
+        )
+        if fresh:
+            msg.header.frame_id = f"{tag};{time.monotonic_ns()}"
+        else:
+            msg.header.frame_id = ""
+            self._applied_tag   = ""
+            self._applied_tag_t = 0.0
+            self._tag           = ""
+            self._tag_t         = 0.0
+
+        self.js_pub.publish(msg)
+
+        if (now - self._last_status_log_t) >= STATUS_LOG_PERIOD_S:
+            self._last_status_log_t = now
+            sp_age    = (now - self._last_sp_t) if self._last_sp_t else -1.0
+            total_rej = sum(c.get("rejected_total", 0) for c in self._stats.values())
+            self.get_logger().info(
+                f"gravity=ENABLED estop={self._estop_active} "
+                f"reinit_pending={self._needs_reinit} sp_age={sp_age:.2f}s "
+                f"rejections={total_rej}"
+            )
+            for name, c in self._stats.items():
+                if c.get("rejected_total", 0) > 0:
+                    self.get_logger().warn(f"  rejections[{name}]={dict(c)}")
+
+
+def make_robot(robot_path: str) -> Articulation:
+    robot = Articulation(robot_path)
+    robot.initialize()
+    return robot
+
+
+async def main():
+    if not rclpy.ok():
+        try:
+            rclpy.init()
+        except RuntimeError:
+            pass
+
+    tmp = Node("physics_twin_params")
+    tmp.declare_parameter("robot_cfg",           DEFAULT_ROBOT_CFG)
+    tmp.declare_parameter("publish_hz",          DEFAULT_PUBLISH_HZ)
+    tmp.declare_parameter("setpoint_timeout_s",  DEFAULT_TIMEOUT_S)
+    tmp.declare_parameter("warn_cooldown",       DEFAULT_WARN_COOLDOWN_S)
+    tmp.declare_parameter("enforce_joint_limits", False)
+    cfg_path = tmp.get_parameter("robot_cfg").value
+    params   = {
+        "publish_hz":           tmp.get_parameter("publish_hz").value,
+        "setpoint_timeout_s":   tmp.get_parameter("setpoint_timeout_s").value,
+        "warn_cooldown":        tmp.get_parameter("warn_cooldown").value,
+        "enforce_joint_limits": bool(tmp.get_parameter("enforce_joint_limits").value),
+    }
+    tmp.destroy_node()
+
+    cfg         = load_robot_cfg(cfg_path)
+    robot_path  = cfg["isaac_path"]
+    robot_scope = cfg["isaac_scope"]
+    dof_order   = list(cfg["all_joints"])
+    joint_paths = {
+        k: v.replace("{scope}", robot_scope)
+        for k, v in cfg["joint_paths"].items()
+    }
+
+    print("=" * 60)
+    print("Initializing physics twin (gravity ENABLED)...")
+    print("=" * 60)
+
+    joint_limits = inspect_limits(joint_paths)
+    configure_drives(cfg["drives"], joint_paths)
+
+    print("Initializing articulation...")
+    robot = make_robot(robot_path)
+    try:
+        mapper = JointMapper(robot.dof_names, dof_order)
+    except RuntimeError as e:
+        print(f"[FATAL] {e}")
+        raise
+
+    node = PhysicsTwin(robot, mapper, cfg, params, joint_limits=joint_limits)
+    print(f"Entering main loop. Publishing /joint_states @ ≤{node.publish_hz} Hz.")
+
+    try:
+        while True:
+            if node._needs_reinit:
+                now = time.monotonic()
+                if (now - node._last_reinit_t) < REINIT_BACKOFF_S:
+                    await omni.kit.app.get_app().next_update_async()
+                    continue
+                node._last_reinit_t = now
+                print("[physics_twin] Reinitializing Articulation...")
+                try:
+                    node.robot = make_robot(robot_path)
+                    JointMapper(node.robot.dof_names, dof_order)
+                    node._seed_from_current()
+                    node._needs_reinit = False
+                    print("[physics_twin] Reinit OK")
+                except Exception as e:
+                    print(f"[physics_twin] Reinit failed: {e}")
+                    await omni.kit.app.get_app().next_update_async()
+                    continue
+
+            for _ in range(MAX_MSG_PER_FRAME):
+                try:
+                    rclpy.spin_once(node, timeout_sec=0.0)
+                except Exception:
+                    break
+
+            node.step()
+            node.publish_states()
+            await omni.kit.app.get_app().next_update_async()
+    finally:
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+
+
+_prev = getattr(sys, "_physics_twin_task", None)
+if _prev is not None and not _prev.done():
+    _prev.cancel()
+sys._physics_twin_task = asyncio.ensure_future(main())

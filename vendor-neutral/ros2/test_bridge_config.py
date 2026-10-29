@@ -196,14 +196,18 @@ signals:
 
 
 def test_estop_forwarding_present(tmp_path):
-    """A YAML with estop in publish: passes the rule."""
+    """A YAML with estop in publish: passes the rule.
+
+    v2.2: the estop signal must ALSO declare type: bool so that the new
+    publish[].type == signals[].type check accepts it.
+    """
     cfg_path = tmp_path / "cfg.yaml"
     cfg_path.write_text("""
 estop_forwarding_required: true
 plc: {driver: tcp_json, host: h}
 signals:
-  cmd_ang: {addr: A, dir: read}
-  estop:   {addr: E, dir: read}
+  cmd_ang: {addr: A, type: float, dir: read}
+  estop:   {addr: E, type: bool,  dir: read}
 robot:
   cmd_ang: [cmd_ang]
 publish:
@@ -213,3 +217,116 @@ publish:
     cfg, _ = load_bridge_config(cfg_path)
     assert cfg.estop_forwarding_required is True
     assert any(p.topic == "/plc/emergency_stop" for p in cfg.publish)
+
+
+# ---- schema v2.2: type-safety fields ----
+
+def test_signal_min_max_accepted(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals:
+  cmd_ang: {addr: A, type: float, dir: read, min: -360.0, max: 360.0}
+robot:
+  cmd_ang: [cmd_ang]
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.signals["cmd_ang"].min == -360.0
+    assert cfg.signals["cmd_ang"].max == 360.0
+
+
+def test_signal_min_gt_max_rejected(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals:
+  cmd_ang: {addr: A, type: float, dir: read, min: 360.0, max: -360.0}
+robot:
+  cmd_ang: [cmd_ang]
+""")
+    with pytest.raises(ConfigError, match="min"):
+        load_bridge_config(cfg_path)
+
+
+@pytest.mark.parametrize("sig_type", ["bool", "string"])
+def test_signal_min_on_non_numeric_rejected(tmp_path, sig_type):
+    cfg_path = _write(tmp_path, f"""
+plc: {{driver: tcp_json, host: h}}
+signals:
+  flag: {{addr: A, type: {sig_type}, dir: read, min: 0, max: 1}}
+""")
+    with pytest.raises(ConfigError, match="min/max"):
+        load_bridge_config(cfg_path)
+
+
+def test_signal_min_non_finite_rejected(tmp_path):
+    """YAML .inf parses to float('inf'); must be rejected at load."""
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals:
+  cmd_ang: {addr: A, type: float, dir: read, min: .inf, max: .inf}
+robot:
+  cmd_ang: [cmd_ang]
+""")
+    with pytest.raises(ConfigError, match="finite"):
+        load_bridge_config(cfg_path)
+
+
+def test_publish_type_must_match_signal(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals:
+  x: {addr: A, type: float, dir: read}
+publish:
+  - {signal: x, topic: /x, type: int}
+""")
+    with pytest.raises(ConfigError, match="publish"):
+        load_bridge_config(cfg_path)
+
+
+def test_strict_types_default_true(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals: {x: {addr: A, dir: read}}
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.strict_types is True
+    assert cfg.strict_type_handshake is False
+
+
+def test_strict_type_handshake_opt_in(tmp_path):
+    cfg_path = _write(tmp_path, """
+strict_type_handshake: true
+plc: {driver: tcp_json, host: h}
+signals: {x: {addr: A, dir: read}}
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.strict_type_handshake is True
+
+
+def test_signal_strict_override(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals:
+  x: {addr: A, type: float, dir: read, strict: false}
+robot:
+  cmd_ang: [x]
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.signals["x"].strict is False
+
+
+def test_reject_non_finite_default_true(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals: {x: {addr: A, dir: read}}
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.signals["x"].reject_non_finite is True
+
+
+def test_allow_int_for_float_default_true(tmp_path):
+    cfg_path = _write(tmp_path, """
+plc: {driver: tcp_json, host: h}
+signals: {x: {addr: A, dir: read}}
+""")
+    cfg, _ = load_bridge_config(cfg_path)
+    assert cfg.signals["x"].allow_int_for_float is True

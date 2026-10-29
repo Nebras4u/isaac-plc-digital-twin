@@ -2,6 +2,9 @@ robot:
   name: kr210_l150
   description: "KUKA KR210 L150 L — 4 controlled axes + 1 passive"
 
+  # v4.0: throttling for per-joint rejection warnings
+  warn_cooldown: 5.0
+
   all_joints:        [joint_1, joint_2, joint_3, joint_5, joint_4]
   controlled_joints: [joint_1, joint_2, joint_3, joint_4]
 
@@ -24,12 +27,12 @@ robot:
   ruckig:
     control_hz: 120.0
     jump_threshold_rad: 0.30
-    # حدوث لكل محور على حدة (Vel, Acc, Jerk)
+    # Per-axis limits
     max_vel:  [6.0, 6.0, 6.0, 10.0]
     max_acc:  [20.0, 20.0, 20.0, 30.0]
     max_jerk: [400.0, 400.0, 400.0, 500.0]
-    brake_acc_mult:  4.0  # بدلاً من 4x في الكود
-    brake_jerk_mult: 8.0  # بدلاً من 8x في الكود
+    brake_acc_mult:  4.0
+    brake_jerk_mult: 8.0
 
   drives:
     joint_1: {stiffness: 1000000.0,  damping: 100000.0,  max_force: 50000000.0}

@@ -1,25 +1,22 @@
 # plc_server_win.py
 # Runs on Windows. Serves PLCSIM tags over TCP as JSON.
 #
-# v3.3 changes:
-#   - ADDED "sync" command: combines read + write into ONE TCP request.
-#     The bridge can send read tags and write tags together, getting both
-#     results in a single network round-trip.
-#   - Existing "read" and "write" commands are preserved for backward
-#     compatibility and testing.
-#   - BATCH can be toggled from outside (PLC_BATCH=0 to disable).
-#   - TIMING can be toggled from outside (PLC_TIMING=0 to disable).
+# v4.0 changes:
+#   - All replies serialized with allow_nan=False (defense in depth).
+#   - read_many() sanitizes each value: NaN/Inf -> "ERR:non_finite".
+#   - New "types" command: returns declared type per tag/array.
+#     Used by the bridge at boot for a type handshake.
 
 import os
 import sys
 import json
+import math
 import time
 import socket
 import threading
 
 import clr
 
-# ---- Load PLCSIM API ----
 API_DIR  = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"
 DLL_PATH = os.path.join(API_DIR, "Siemens.Simatic.Simulation.Runtime.Api.x64.dll")
 
@@ -35,7 +32,6 @@ from Siemens.Simatic.Simulation.Runtime import (
     SimulationRuntimeException,
 )
 
-# ---- Connect ----
 INSTANCE_NAME = os.environ.get("PLC_INSTANCE", "296")
 instance = SimulationRuntimeManager.CreateInterface(INSTANCE_NAME)
 print(f"Connected to PLCSIM: {instance.Name}, State: {instance.OperatingState}")
@@ -48,7 +44,6 @@ instance.UpdateTagList()
 print(f"Tag list updated. Total tags: {len(instance.TagInfos)}")
 
 
-# ---- Tag map ----
 DB = "MAIN_KUKA_KR210_L150_L"
 
 BOOL  = "Bool"
@@ -87,15 +82,14 @@ TAGS = {
 }
 
 ARRAYS = {
-    f"{DB}.MainRobotLeft_CmdAng": (f"{DB}.MainRobotLeft_CmdAng[{{i}}]", LREAL, 4),
-    f"{DB}.MainRobotLeft_ActAng": (f"{DB}.MainRobotLeft_ActAng[{{i}}]", LREAL, 4),
-    f"{DB}.MainRobotLeft_ActPos": (f"{DB}.MainRobotLeft_ActPos[{{i}}]", LREAL, 4),
+    f"{DB}.MainRobotLeft_CmdAng":    (f"{DB}.MainRobotLeft_CmdAng[{{i}}]", LREAL, 4),
+    f"{DB}.MainRobotLeft_ActAng":    (f"{DB}.MainRobotLeft_ActAng[{{i}}]", LREAL, 4),
+    f"{DB}.MainRobotLeft_ActPos":    (f"{DB}.MainRobotLeft_ActPos[{{i}}]", LREAL, 4),
     f"{DB}.MainRobotLeft_Pos4Maint": (f"{DB}.MainRobotLeft_Pos4Maint[{{i}}]", LREAL, 4),
-    f"{DB}.MainRobotLeft_HomePos":  (f"{DB}.MainRobotLeft_HomePos[{{i}}]", LREAL, 4),
+    f"{DB}.MainRobotLeft_HomePos":   (f"{DB}.MainRobotLeft_HomePos[{{i}}]", LREAL, 4),
 }
 
 
-# ---- Optional timing diagnostics (default ON; disable with PLC_TIMING=0) ----
 TIMING = os.environ.get("PLC_TIMING", "1") == "1"
 _tstat = {}
 _tlock = threading.Lock()
@@ -147,7 +141,7 @@ def _write_one(name, t, value):
 
 
 # =============================================================================
-# Batch (single API call) support
+# Batch (single API call) support — unchanged from v3.3
 # =============================================================================
 BATCH_ENABLED = os.environ.get("PLC_BATCH", "1") == "1"
 _MAX_BATCH_FAILS = 3
@@ -439,6 +433,8 @@ def read_many(names):
     for n, kind, start, cnt in plan:
         chunk = vals[start:start + cnt]
         result[n] = chunk if kind == "array" else chunk[0]
+    for n in result:
+        result[n] = _sanitize(result[n])
     return result
 
 
@@ -487,6 +483,28 @@ def write_many(writes):
     return result
 
 
+# =============================================================================
+# v4.0: NaN/Inf sanitation + safe JSON send
+# =============================================================================
+def _sanitize(v):
+    if isinstance(v, float) and not math.isfinite(v):
+        return f"ERR:non_finite:{v!r}"
+    if isinstance(v, list):
+        return [_sanitize(x) for x in v]
+    return v
+
+
+def _send_json(conn, obj):
+    try:
+        payload = json.dumps(obj, allow_nan=False)
+    except ValueError as e:
+        err = {"error": f"non-finite value in reply: {e}",
+               "seq": obj.get("seq") if isinstance(obj, dict) else None,
+               "ts": time.time()}
+        payload = json.dumps(err, allow_nan=False)
+    conn.sendall((payload + "\n").encode())
+
+
 def handle_client(conn, addr):
     print(f"[+] Client connected: {addr}")
     try:
@@ -507,10 +525,10 @@ def handle_client(conn, addr):
                     req = json.loads(line.decode("utf-8"))
                 except Exception as e:
                     seq += 1
-                    conn.sendall((json.dumps({
+                    _send_json(conn, {
                         "error": f"bad json: {e}",
                         "seq": seq, "ts": time.time(),
-                    }) + "\n").encode())
+                    })
                     continue
 
                 cmd = req.get("cmd")
@@ -529,7 +547,6 @@ def handle_client(conn, addr):
                     reply = {"written": result}
 
                 elif cmd == "sync":
-                    # NEW: combined read + write in one request
                     read_names = req.get("read", [])
                     writes = req.get("write", {})
                     result_read = read_many(read_names)
@@ -542,6 +559,13 @@ def handle_client(conn, addr):
                         "arrays": list(ARRAYS.keys()),
                     }
 
+                elif cmd == "types":
+                    # v4.0: exposed for bridge-side handshake
+                    reply = {
+                        "types": dict(TAGS),
+                        "arrays": {k: v[1] for k, v in ARRAYS.items()},
+                    }
+
                 else:
                     reply = {"error": f"unknown cmd: {cmd}"}
 
@@ -550,7 +574,7 @@ def handle_client(conn, addr):
 
                 reply["seq"] = seq
                 reply["ts"] = time.time()
-                conn.sendall((json.dumps(reply) + "\n").encode())
+                _send_json(conn, reply)
 
     except Exception as e:
         print(f"[!] Client {addr} error: {e}")

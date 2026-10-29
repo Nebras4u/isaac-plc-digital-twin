@@ -2,24 +2,33 @@
 # Vendor-neutral Ruckig-based trajectory generator.
 # Reads robot definition from robot.yaml.
 #
-# Fixes in this revision (v3.6):
-#   * [A] Removed np.interp on the full joint vector (passive axes preserved).
-#   * [B] needs_target_update compares against _last_applied_cmd_deg.
-#   * [C] _last_applied_cmd_deg guarded under lock.
-#   * [D] STOPPING→IDLE clears _last_applied_cmd_deg.
-#   * [E] RuckigPlanner validates all params at construction.
-#   * [F] _cmd_tag is NOT consumed by servo_tick anymore. It is only
-#     cleared by _publish() AFTER the tag has actually been attached to
-#     an outgoing /servo_setpoints message. Previously every tick cleared
-#     it — so ticks that didn't publish (needs_target_update=False,
-#     STOPPING without step, etc.) silently ate the tag, producing
-#     /servo_setpoints messages with a 5-part frame_id instead of 6 and
-#     breaking the latency-probe chain.
+# v4.0 — industrial type-safety (mirrors plc_ros_bridge.py / physics_twin.py):
+#   * on_js  : name/position length check, per-joint type check, NaN/Inf
+#              rejection. Refuses to contaminate _actual[] with non-finite.
+#   * on_cmd : length check, per-joint type check, NaN/Inf rejection.
+#              A bad message is rejected entirely (no partial state update,
+#              no tag processing) so the 0.5 s command timeout remains the
+#              braking safety mechanism.
+#   * _publish : defense-in-depth check on Ruckig output. If the planner
+#              ever yields a non-finite position, /servo_setpoints is not
+#              published (tag preserved for the next valid publish).
+#   * Per-reason rejection counters (`_stats`), surfaced in the 1-s status
+#     log and in throttled warnings (`_warn`).
+#   * `warn_cooldown` param (default 5 s) read from robot.yaml.
+#
+# v3.6 changes preserved:
+#   * [A] no np.interp on the passive axes
+#   * [B] needs_target_update vs _last_applied_cmd_deg
+#   * [C] _last_applied_cmd_deg guarded by lock
+#   * [D] STOPPING→IDLE clears _last_applied_cmd_deg
+#   * [E] RuckigPlanner validates all params at construction
+#   * [F] _cmd_tag consumed only by _publish() after actual attachment
 
 import math
 import os
 import threading
 import time
+from collections import defaultdict
 
 import numpy as np
 import yaml
@@ -134,6 +143,9 @@ class RuckigPlanner:
 
     def sync_state(self, m):
         m = np.asarray(m, dtype=np.float64)
+        # v4.0: refuse to feed non-finite state into Ruckig
+        if not np.all(np.isfinite(m)):
+            return
         if np.any(np.abs(m - self._last_pos) > self.jump_threshold):
             self.inp.current_velocity     = [0.0] * self.dof
             self.inp.current_acceleration = [0.0] * self.dof
@@ -190,6 +202,11 @@ class TrajectoryTwin(Node):
         self.ctrl_dof = len(self.controlled_joints)
         self.name_to_idx  = {n: i for i, n in enumerate(self.all_joints)}
         self.ctrl_indices = [self.name_to_idx[j] for j in self.controlled_joints]
+
+        # v4.0: type-safety state
+        self._warn_cooldown = float(cfg.get("warn_cooldown", 5.0))
+        self._stats         = defaultdict(lambda: defaultdict(int))
+        self._warned        = {}
 
         r = cfg["ruckig"]
         self.planner = RuckigPlanner(
@@ -250,10 +267,8 @@ class TrajectoryTwin(Node):
         self._cmd_timeout_logged = False
         self._no_feedback_logged = False
         self._bad_cmd_logged     = False
-        # v3.6 [F]: the tag is kept here until _publish() actually attaches
-        # it to an outgoing message. Never consumed inside servo_tick.
         self._cmd_tag            = ""
-        self._cmd_tag_t          = 0.0   # monotonic time when the tag arrived
+        self._cmd_tag_t          = 0.0
 
         # ------------------------------------------------------------------
         # Subscriptions
@@ -278,35 +293,97 @@ class TrajectoryTwin(Node):
         })
 
     # --------------------------------------------------------------------- #
+    # v4.0 validation helpers
+    # --------------------------------------------------------------------- #
+    def _bump(self, name, reason):
+        key = reason.split(":", 1)[0] if isinstance(reason, str) else str(reason)
+        if not key:
+            key = "bad_value"
+        self._stats[name][key] += 1
+        self._stats[name]["rejected_total"] += 1
+
+    def _warn(self, name, message):
+        now = time.monotonic()
+        if now - self._warned.get(name, 0.0) > self._warn_cooldown:
+            self._warned[name] = now
+            counts = dict(self._stats.get(name, {}))
+            try:
+                self.log.warning(message, extra={"counts": counts})
+            except Exception:
+                pass
+
+    # --------------------------------------------------------------------- #
     # Callbacks
     # --------------------------------------------------------------------- #
     def on_js(self, msg):
+        if len(msg.name) != len(msg.position):
+            self._bump("__joint_states__", "length_mismatch")
+            self._warn("__joint_states__",
+                       f"length mismatch: name={len(msg.name)} "
+                       f"pos={len(msg.position)}")
+            return
+
+        valid_count = 0
         with self.lock:
             for n, p in zip(msg.name, msg.position):
                 i = self.name_to_idx.get(n)
-                if i is not None:
-                    self._actual[i] = float(p)
-            self._has_actual = True
-            self._last_js_t = time.monotonic()
+                if i is None:
+                    self._bump(n, "unknown_joint")
+                    self._warn(n, f"unknown joint in /joint_states: {n!r}")
+                    continue
+                try:
+                    f = float(p)
+                except (TypeError, ValueError):
+                    self._bump(n, "bad_type")
+                    self._warn(n, f"bad joint_states type: {type(p).__name__}")
+                    continue
+                if not math.isfinite(f):
+                    self._bump(n, "non_finite")
+                    self._warn(n, f"non-finite joint_states[{n}]: {f!r}")
+                    continue
+                self._actual[i] = f
+                valid_count += 1
+            if valid_count > 0:
+                self._has_actual = True
+                self._last_js_t = time.monotonic()
 
     def on_cmd(self, msg):
         n = self.ctrl_dof
+        if len(msg.position) < n:
+            self._bump("__cmd__", f"short_cmd:{len(msg.position)}<{n}")
+            self._warn("__cmd__",
+                       f"cmd too short: {len(msg.position)} < {n}")
+            return
+
+        new_cmd = []
+        for i, x in enumerate(msg.position[:n]):
+            jname = self.controlled_joints[i]
+            try:
+                f = float(x)
+            except (TypeError, ValueError):
+                self._bump(jname, "bad_type")
+                self._warn(jname, f"bad cmd type: {type(x).__name__}")
+                return
+            if not math.isfinite(f):
+                self._bump(jname, "non_finite")
+                self._warn(jname, f"non-finite cmd[{jname}]: {f!r}")
+                return
+            new_cmd.append(f)
+
         with self.lock:
-            if len(msg.position) >= n:
-                new_cmd = [float(x) for x in msg.position[:n]]
-                if new_cmd != self._last_received_cmd_deg:
-                    self._last_received_cmd_deg = list(new_cmd)
-                    self.log.info("cmd_received", extra={"cmd_deg": new_cmd})
-                self._cmd_deg = new_cmd
-                tag = msg.header.frame_id
-                if tag.startswith("p;"):
-                    self._cmd_tag   = tag
-                    self._cmd_tag_t = time.monotonic()
-                else:
-                    self._cmd_tag   = ""
-                    self._cmd_tag_t = 0.0
-                self._cmd_ok = True
-                self._last_cmd_t = time.monotonic()
+            if new_cmd != self._last_received_cmd_deg:
+                self._last_received_cmd_deg = list(new_cmd)
+                self.log.info("cmd_received", extra={"cmd_deg": new_cmd})
+            self._cmd_deg = new_cmd
+            tag = msg.header.frame_id
+            if tag.startswith("p;"):
+                self._cmd_tag   = tag
+                self._cmd_tag_t = time.monotonic()
+            else:
+                self._cmd_tag   = ""
+                self._cmd_tag_t = 0.0
+            self._cmd_ok = True
+            self._last_cmd_t = time.monotonic()
 
     def on_enable(self, msg):
         with self.lock:
@@ -326,7 +403,7 @@ class TrajectoryTwin(Node):
             self._estop = new
 
     # --------------------------------------------------------------------- #
-    # Servo tick
+    # Servo tick (v3.6 logic preserved)
     # --------------------------------------------------------------------- #
     def servo_tick(self):
         now = time.monotonic()
@@ -341,11 +418,9 @@ class TrajectoryTwin(Node):
             has_actual    = self._has_actual
             last_js_t     = self._last_js_t
             last_applied  = self._last_applied_cmd_deg
-            # v3.6 [F]: read the tag but do NOT clear it here.
             tag           = self._cmd_tag
             tag_t         = self._cmd_tag_t
 
-        # ---- freshness checks -----------------------------------------
         fresh = has_actual and (now - last_js_t) <= 0.5
 
         if (now - last_cmd_t) > 0.5:
@@ -378,6 +453,9 @@ class TrajectoryTwin(Node):
                 lo, hi = self.limits_deg[j]
                 if not math.isfinite(deg) or deg < lo or deg > hi:
                     valid = False
+                    self._bump(j, "below_min" if math.isfinite(deg) and deg < lo
+                               else "above_max" if math.isfinite(deg)
+                               else "non_finite_at_servo")
                     break
                 target[i] = math.radians(deg)
 
@@ -436,12 +514,27 @@ class TrajectoryTwin(Node):
                     self._last_applied_cmd_deg = None
 
     # --------------------------------------------------------------------- #
-    # Publish — consumes the tag ONLY when actually attached
+    # Publish — v4.0: defense-in-depth on planner output
     # --------------------------------------------------------------------- #
     def _publish(self, ctrl_positions, tag, tag_t):
+        # v4.0: refuse to publish non-finite to /servo_setpoints.
+        # Tag is preserved (not consumed) so the next valid publish can
+        # still attach it if still relevant — the latency probe will
+        # reject stale chains by age, not here.
+        try:
+            positions_list = [float(x) for x in ctrl_positions]
+        except (TypeError, ValueError):
+            self._bump("__publish__", "bad_type")
+            self._warn("__publish__", "non-numeric ctrl_positions")
+            return
+        if not all(math.isfinite(x) for x in positions_list):
+            self._bump("__publish__", "non_finite")
+            self._warn("__publish__", "non-finite ctrl_positions")
+            return
+
         pos = self._msg.position
         for i, idx in enumerate(self.ctrl_indices):
-            pos[idx] = float(ctrl_positions[i])
+            pos[idx] = positions_list[i]
 
         self._msg.header.stamp = self.get_clock().now().to_msg()
         if tag:
@@ -450,13 +543,8 @@ class TrajectoryTwin(Node):
             self._msg.header.frame_id = ""
         self.setpoint_pub.publish(self._msg)
 
-        # v3.6 [F]: consume the tag ONLY after it has been attached to a
-        # real outgoing message. A subsequent tick that publishes without
-        # a new command will see tag="" (correctly) because the previous
-        # command already completed its chain.
         if tag:
             with self.lock:
-                # Only clear if no newer tag has arrived in the meantime.
                 if self._cmd_tag_t == tag_t:
                     self._cmd_tag = ""
                     self._cmd_tag_t = 0.0
@@ -478,6 +566,19 @@ class TrajectoryTwin(Node):
                 as_ = f"{a:>14.3f}"
                 ds = f"{d:>14.3f}" if d is not None else f"{'--':>14}"
                 lines.append(f"{j:<10}{cs}{as_}{ds}")
+
+            # v4.0: rejection summary
+            total_rej = sum(c.get("rejected_total", 0)
+                            for c in self._stats.values())
+            if total_rej > 0:
+                lines.append("-" * 50)
+                lines.append(f"rejections_total: {total_rej}")
+                for name, counts in sorted(self._stats.items()):
+                    rej = {k: v for k, v in counts.items()
+                           if k != "rejected_total" and v > 0}
+                    if rej or counts.get("rejected_total", 0) > 0:
+                        lines.append(f"  {name}: {dict(counts)}")
+
             self.log.info("trajectory_status",
                           extra={"table": "\n".join(lines)})
 
