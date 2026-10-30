@@ -2,13 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/Tests-86%20pytest%20%2B%209%20standalone-success)](#testing)
-[![Schema](https://img.shields.io/badge/Config%20Schema-v2.2-success)](#configuration)
-[![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#latency-performance)
-[![Reference max latency](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#latency-performance)
-[![VM v3.7 p50](https://img.shields.io/badge/VM%20v3.7%20p50-14.62%20ms-blueviolet)](#results-this-machine)
-[![VM v4.0 p50](https://img.shields.io/badge/VM%20v4.0%20p50-16.07%20ms-informational)](#results-this-machine)
+[![ORCID](https://img.shields.io/badge/ORCID-0009--0001--2333--1502-a6ce39?logo=orcid&logoColor=white)](https://orcid.org/0009-0001-2333-1502)
 
 An industrial-grade **Digital Twin platform** for robot arms driven by
 **Siemens S7-1500** PLCs, synchronized with **NVIDIA Isaac Sim** through

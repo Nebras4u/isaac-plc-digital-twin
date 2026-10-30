@@ -2,18 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![PLC](https://img.shields.io/badge/PLC-Vendor--Neutral-lightgrey)](#supported-combinations)
-[![ROS 2](https://img.shields.io/badge/ROS%202-Humble%20%7C%20Jazzy-blue)](https://docs.ros.org/)
-[![Isaac Sim](https://img.shields.io/badge/Isaac%20Sim-5.1-green)](https://developer.nvidia.com/isaac-sim)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-yellow)](https://www.python.org)
-[![Pydantic](https://img.shields.io/badge/Pydantic-2.x-blueviolet)](https://docs.pydantic.dev/)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen)](CHANGELOG.md)
 [![Tests](https://img.shields.io/badge/Tests-86%20pytest%20%2B%209%20standalone-success)](#testing)
-[![Schema](https://img.shields.io/badge/Config%20Schema-v2.2-success)](#configuration)
-[![Status](https://img.shields.io/badge/Status-Active-brightgreen)]()
-[![Reference mean latency](https://img.shields.io/badge/Reference%20mean%20latency-5.2%20ms-success)](#control-loop-latency-reference)
-[![Reference max](https://img.shields.io/badge/Reference%20max%20latency-16.3%20ms-success)](#control-loop-latency-reference)
-[![VM v3.7 p50](https://img.shields.io/badge/VM%20v3.7%20p50-14.62%20ms-blueviolet)](#v37--probe-observability--production-path-this-machine)
-[![VM v4.0 p50](https://img.shields.io/badge/VM%20v4.0%20p50-16.07%20ms-informational)](#v40--industrial-type-safety-this-machine)
+[![ORCID](https://img.shields.io/badge/ORCID-0009--0001--2333--1502-a6ce39?logo=orcid&logoColor=white)](https://orcid.org/0009-0001-2333-1502)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
 The platform synchronizes any robot arm with any PLC through **ROS 2**,
@@ -25,6 +16,8 @@ implementations — KUKA KR210 ([`../kuka/`](../kuka/)) and Yaskawa GP110
 platform.
 
 ---
+
+![S7-1500T ↔ ROS2 ↔ Isaac Sim Architecture and latency budget](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/vendor-neutral/docs/architecture_and_latency_budget.png)
 
 ## Safety Notice
 
