@@ -11,7 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 4
 
-_Nothing yet._
+### Added
+
+- **Beckhoff TwinCAT 3 (ADS) transport.** New `ads` driver in
+  `linux/plc_drivers.py` based on `pyads`. Enables the vendor-neutral
+  bridge to talk to TwinCAT 3 PLCs using the ADS protocol (port 851).
+- **Configuration keys** in `plc_ros_bridge.yaml` for ADS:
+  `ams_net_id`, `ams_port`, `host`, `local_ams_net_id`.
+- **`vendor-neutral/docs/beckhoff_ads_setup.md`** — full setup guide:
+  AMS NetID discovery, `StaticRoutes.xml` editing, firewall rules,
+  and a troubleshooting table (errors 6, 7, 13, 1800, 1861, 0x12).
+- **Connection, read, and write verified** between Linux (Ubuntu 24.04,
+  pyads) and Windows (TwinCAT 3.1, Build 4024.x).
+- **Docker verification:** The ADS connection has been tested inside the
+  `isaac_reference_v3` container (`--network host`). All 4 pytest tests
+  pass in 0.04 s. This confirms that `pyads` works reliably in Docker,
+  avoiding the intermittent `pyads` timeouts observed on native Linux.
+
+### Notes
+
+- The ADS NetID is **not derived from the IP address**. Always read it
+  from `TwinCAT Router → Change AMS NetId`.
+- The Linux client must be registered in
+  `C:\TwinCAT\3.1\Target\StaticRoutes.xml` on the Windows machine.
+- ADS is unencrypted; use an isolated network or direct cable.
 
 ---
 
@@ -730,6 +753,7 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 | **v3.7.0** | **Any robot** | **Any transport** | **+ probe_attempted + joint_mapper.py + 51+8 tests + 14.48 ms**    | **`vendor-neutral/`** |
 | **v4.0.0** | **Any robot** | **Any transport** | **+ industrial type-safety (schema v2.2, min/max/strict, type **   | **`vendor-neutral/`** |
 |            |               |                   |  ** handshake, NaN guards), 86+9 tests, +0.01 ms p99 vs v3.7**     |                       |
+| **v4.1.0** | **Any robot** | **+ ADS (Beckhoff TwinCAT 3)** | **+ Beckhoff TwinCAT 3 support via pyads; full setup & troubleshooting guide** | **`vendor-neutral/`** |
 
 ---
 

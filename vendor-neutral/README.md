@@ -3,7 +3,7 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23312010.svg)](https://doi.org/10.5281/zenodo.23312010)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen)](CHANGELOG.md)
-[![Tests](https://img.shields.io/badge/Tests-86%20pytest%20%2B%209%20standalone-success)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-90%20pytest%20%2B%209%20standalone-success)](#testing)
 [![ORCID](https://img.shields.io/badge/ORCID-0009--0001--2333--1502-a6ce39?logo=orcid&logoColor=white)](https://orcid.org/0009-0001-2333-1502)
 
 A **vendor-neutral Digital Twin platform** for industrial robot arms.
@@ -29,8 +29,8 @@ platform.
   counters) is **functional monitoring** that stops the *simulated* robot.
   It is not designed, validated, or certified according to IEC 61508,
   ISO 13849-1, or IEC 62061.
-- `tcp_json`, OPC UA, and ROS 2 links carry no safety-rated integrity
-  (no black channel, no safety protocol).
+- `tcp_json`, OPC UA, **ADS (Beckhoff)**, and ROS 2 links carry no
+  safety-rated integrity (no black channel, no safety protocol).
 - A real installation needs an independent certified safety layer (for
   example an F-CPU with PROFIsafe and hardware E-Stop circuits).
 
@@ -106,6 +106,11 @@ vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
 the historical sections. This is expected and does not indicate a
 regression.
 
+> **ADS + Docker note:** The Beckhoff TwinCAT 3 (ADS) driver has been
+> verified inside the `isaac_reference_v3` container using
+> `--network host`. All 4 ADS connection tests pass in 0.04 s. See
+> [`docs/beckhoff_ads_setup.md`](docs/beckhoff_ads_setup.md).
+
 **How to measure on your machine:**
 
 1. Set `latency_probe: true` in `config/plc_ros_bridge.yaml`.
@@ -128,8 +133,8 @@ This folder removes those constraints:
 Three abstractions make this possible:
 
 1. **Transport abstraction** — `plc_drivers.py` provides a common
-   `PlcDriver` interface with three implementations: `tcp_json`, `opcua`,
-   `plc_api`.
+   `PlcDriver` interface with four implementations: `tcp_json`, `opcua`,
+   `plc_api`, and **`ads`** (Beckhoff TwinCAT 3).
 2. **Signal abstraction** — `plc_config.py` handles address mapping and
    value extraction, decoupled from any specific PLC protocol.
 3. **Robot abstraction** — a single `robot.yaml` describes joints,
@@ -161,7 +166,7 @@ nodes. This closes the "silent coercion" class of bugs (`int(3.9) → 3`,
 | :--------------- | :------------------------------ | :---------------------------------------------- |
 | **PLC vendor**   | Siemens only                    | Any PLC with OPC UA, TCP/JSON, or PLCSIM API    |
 | **Robot vendor** | KUKA only, then Yaskawa only    | Any articulated robot described in `robot.yaml` |
-| **Transport**    | TCP/JSON only, then OPC UA only | Selected by a single YAML line                  |
+| **Transport**    | TCP/JSON only, then OPC UA only | Selected by a single YAML line (tcp_json, opcua, plc_api, ads) |
 
 The same code runs unchanged across all combinations. Only configuration
 differs.
@@ -177,12 +182,12 @@ differs.
                                      |
                            one of three transports
                                      |
-            +------------------------+--------------------------+
-            |                        |                          |
-       tcp_json                    opcua                     plc_api
-     (Windows server)           (native OPC UA)         (PLCSIM direct)
-            |                        |                          |
-            +------------------------+--------------------------+
+            +------------------------+--------------------------+------------------------+
+            |                        |                          |                        |
+       tcp_json                    opcua                     plc_api                    ads
+     (Windows server)           (native OPC UA)         (PLCSIM direct)      (Beckhoff TwinCAT 3)
+            |                        |                          |                        |
+            +------------------------+--------------------------+------------------------+
                                      |
                         +------------v------------+
                         |  linux/plc_ros_bridge.py|
@@ -303,6 +308,7 @@ that tick.
     |
     +-- docs/
         +-- migration.md
+        +-- beckhoff_ads_setup.md         # TwinCAT 3 (ADS) setup & troubleshooting
         +-- latency_comparison.md         # Full comparison report
         +-- latency_full_loop_OPC-UA.md   # Baseline report
         +-- upgrade_report.html           # Session report: Prototype -> Production Grade
@@ -315,6 +321,7 @@ that tick.
 | :---------------------------- | :--------- | :------------------------ | :----------: | :--------- |
 | Siemens S7-1500 (PLCSIM Adv.) | `plc_api`  | KUKA KR210                | TBD          | Verified   |
 | Siemens S7-1500 (PLCSIM Adv.) | `tcp_json` | KUKA KR210                | 5.2 ms (ref) | Verified   |
+| **Beckhoff TwinCAT 3 (ADS)**  | **`ads`**  | **Any robot in `robot.yaml`** | **TBD**      | **Verified (Docker)** |
 | Any OPC UA server             | `opcua`    | Any robot in `robot.yaml` | ~7 ms (ref)  | Structural |
 | Siemens S7-1500               | `opcua`    | Yaskawa GP110             | TBD          | Structural |
 
@@ -368,6 +375,10 @@ verification on that combination is pending.
     # 4. Linux: trajectory twin (Ruckig trajectory generator)
     taskset -c 3 python3 linux/trajectory_twin.py \
         --ros-args -p robot:=config/robot.yaml
+
+    # 5. Docker: run the ADS test inside the container (requires --network host)
+    docker run --network host -it your_image_name bash -c \
+        "cd /workspace && pytest tests/test_beckhoff_ads_connection.py -v" 
 
 ### Switching Transport
 
@@ -819,6 +830,11 @@ act_ang write policy (`_act_ang_needs_write` / `_mark_written` /
 io_loop deadline counting (`_deadline_miss`, `_max_overrun_ms`),
 physics estop latch (`_estop_hold_isaac`, latch-once, hold-after-clear,
 refresh-failure, second-latch).
+
+**`test_beckhoff_ads_connection.py` — 4 tests (ADS)**
+
+Connection open, Boolean read, LREAL array read, LREAL array write.
+Verified inside Docker (`--network host`) in 0.04 s.
 
 **`test_probe_chain.py` — 9 tests**
 
@@ -1572,6 +1588,7 @@ external knob at 200 Hz:
 | `README.md` (this file)             | Full documentation (all sections)             |
 | `CHANGELOG.md`                      | Version history (all generations)             |
 | `docs/migration.md`                 | How this folder was split from v2.0.0         |
+| `docs/beckhoff_ads_setup.md`        | TwinCAT 3 (ADS) setup, routes, and troubleshooting |
 | `docs/latency_comparison.md`        | Full latency comparison report                |
 | `docs/latency_full_loop_OPC-UA.md`  | OPC UA baseline report                        |
 | `docs/upgrade_report.html`          | Session report: Prototype -> Production Grade |
@@ -1599,6 +1616,7 @@ external knob at 200 Hz:
 | v3.6.0  | Any robot     | Any transport     | + probe chain fixes (100% capture), same-tick `act_ang` write                   | `vendor-neutral/`            |
 | v3.7.0  | Any robot     | Any transport     | + probe_attempted, joint_mapper.py, poll_hz 200, 51+8 tests, 14.62 ms p50       | `vendor-neutral/`            |
 | **v4.0.0** | **Any robot** | **Any transport** | **+ industrial type-safety (schema v2.2, per-signal min/max/strict, wire type check, boot handshake, per-signal rejection counters, NaN/Inf guards in all four nodes), 86+9 tests, +0.01 ms p99 vs v3.7** | **`vendor-neutral/`** |
+| **v4.1.0** | **Any robot** | **+ ADS (Beckhoff TwinCAT 3)** | **+ Beckhoff TwinCAT 3 support via `pyads`; full setup & troubleshooting guide** | **`vendor-neutral/`** |
 
 ---
 
@@ -1724,6 +1742,18 @@ but they must be understood before deploying to a physical robot.
   twin's `IDLE → RUNNING → STOPPING` transitions are only partially
   covered.
 
+### Linux `pyads` stability (Docker workaround)
+
+- The `pyads` library can exhibit intermittent connection timeouts on
+  **native Linux** when the connection is opened and closed repeatedly
+  in quick succession. This is a known limitation of `pyads`, not a
+  network or TwinCAT issue.
+- **Workaround:** Run `pyads` inside a Docker container with
+  `--network host`. All ADS tests pass reliably in that environment
+  (0.04 s for 4 tests). See
+  [`docs/beckhoff_ads_setup.md`](docs/beckhoff_ads_setup.md) for the
+  Docker setup.
+
 ### Not Certified
 
 This project is **not a certified safety function**. See the
@@ -1827,6 +1857,8 @@ This project is **not a certified safety function**. See the
       to provide updated canonical numbers
 - [ ] Add a **repeatable baseline run** (motion from PLC, 5 min) as a
       scripted benchmark to compare v3.7 and v4.0 on identical motion
+- [ ] **Beckhoff TwinCAT 3 (ADS)** — measure latency and add to the
+      reference comparison tables
 
 ### Planned
 
