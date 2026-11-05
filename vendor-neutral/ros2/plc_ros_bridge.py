@@ -1,34 +1,22 @@
 #!/usr/bin/env python3
 """PLC <-> ROS 2 bridge (vendor neutral).
 
-v4.0 — industrial type-safety overhaul (integrated on top of v3.7+):
-  * Wire-level NaN/Inf rejection:
-      - plc_server_win.py sends JSON with allow_nan=False.
-      - TcpJsonDriver parses with a parse_constant that raises on
-        NaN/Infinity; then re-checks every value against the config-
-        declared type via _wire_type_check.
-  * Driver-level type check (_wire_type_check): mismatches surface as
-    "ERR:TYPE:..." strings, not silent coercions.
-  * _get is a validator, not a coercer. strict_types=True (default)
-    rejects str->int, int->bool, float->int, etc. No silent truncation,
-    no silent NaN.
-  * Per-signal min/max range checks from config.
-  * Per-signal rejection counters (`_stats`) in _probe_stats() and
-    _diag().
-  * Boot-time type handshake (TcpJsonDriver only): server's declared
-    types compared against config; mismatch is logged loudly and,
-    with strict_type_handshake=True, aborts the connection.
-  * act_ang NaN guard: /joint_states with non-finite positions is
-    never written to the PLC (cmd_ack/feedback_valid go False instead).
-  * strict_types=False + _coerce_legacy() for transitional deployment:
-    old behaviour restored, but _to_int_checked and _to_finite_float
-    still prevent silent truncation and NaN.
-  * PlcApiDriver default instance name corrected to "296" (matches
-    plc_server_win.py).
+v4.1 — native TwinCAT 3 ADS support:
+  * New AdsDriver: batch read_list_by_name / write_list_by_name,
+    one ADS round-trip per tick, array-aware via SignalConfig.length.
+    read_list_by_name result is normalised to a dict (list OR dict).
+  * PlcDriver.set_signal_lengths: base-class hook (default no-op).
+  * Bridge __init__ passes per-address length to the driver.
 
-v3.7 — probe_attempted counter.
-v3.6 — same-tick act_ang write.
-v3.4 — initial same-tick refactor.
+v4.0 — industrial type-safety overhaul (integrated on top of v3.7+):
+  * Wire-level NaN/Inf rejection.
+  * Driver-level type check (_wire_type_check).
+  * _get is a validator, not a coercer.
+  * Per-signal min/max range checks from config.
+  * Per-signal rejection counters (`_stats`).
+  * Boot-time type handshake (TcpJsonDriver only).
+  * act_ang NaN guard.
+  * PlcApiDriver default instance name "296".
 """
 import abc
 import csv
@@ -138,11 +126,7 @@ _SERVER_TYPE_MAP = {
 
 
 def _wire_type_check(expected, v):
-    """Return value unchanged if v matches expected; else an ERR string.
-
-    Widening rule (float accepts int) is applied only for float signals.
-    bool is never accepted as int, even though it is a subclass.
-    """
+    """Return value unchanged if v matches expected; else an ERR string."""
     if v is None:
         return None
     if isinstance(v, str) and v.startswith("ERR:"):
@@ -232,6 +216,8 @@ class PlcDriver(abc.ABC):
     @abc.abstractmethod
     def write(self, values): ...
     def set_signal_types(self, types):
+        pass
+    def set_signal_lengths(self, lengths):
         pass
     def get_server_types(self):
         return None
@@ -366,6 +352,137 @@ class TcpJsonDriver(PlcDriver):
         except Exception:
             pass
         self.sock = None
+
+
+class AdsDriver(PlcDriver):
+    """Native TwinCAT 3 ADS driver via pyads.
+
+    Batched: one read_list_by_name + one write_list_by_name per tick.
+    Arrays (length > 1) use ctypes array types so a 4-element LREAL array
+    is read/written in one ADS call, matching the 'float' YAML type.
+    """
+
+    def __init__(self, cfg):
+        self.ams_net_id = cfg.ams_net_id
+        self.ams_port   = cfg.ams_port
+        self.host       = cfg.host
+        self.local_ams  = cfg.local_ams_net_id
+        self.plc        = None
+        self.types      = {}
+        self.lengths    = {}
+        self._last_sock_ms  = 0.0
+        self._last_parse_ms = 0.0
+
+    def set_signal_types(self, types):
+        self.types = dict(types)
+
+    def set_signal_lengths(self, lengths):
+        self.lengths = dict(lengths)
+
+    def connect(self):
+        import pyads
+        self.close()
+    
+        pyads.open_port()
+        pyads.set_local_address(self.local_ams)   # ← 192.168.50.2.1.1
+    
+        self.plc = pyads.Connection(
+            self.ams_net_id,   # ← 111.111.111.3.1.1
+            self.ams_port,     # ← 851
+            self.host          # ← 192.168.50.1
+        )
+        self.plc.open()
+
+    def close(self):
+        if self.plc is not None:
+            try:
+                if self.plc.is_open:
+                    self.plc.close()
+            except Exception:
+                pass
+        self.plc = None
+
+    @staticmethod
+    def _plc_type(t):
+        import pyads
+        return {
+            "bool":   pyads.PLCTYPE_BOOL,
+            "int":    pyads.PLCTYPE_INT,       # 16-bit; PLCTYPE_DINT for DINT
+            "float":  pyads.PLCTYPE_LREAL,     # 64-bit; PLCTYPE_REAL for REAL
+            "string": pyads.PLCTYPE_STRING,
+        }[t]
+
+    def _type_for(self, addr):
+        t = self.types.get(addr, "float")
+        n = self.lengths.get(addr, 1)
+        pt = self._plc_type(t)
+        return pt * n if n > 1 else pt
+
+    @staticmethod
+    def _unpack(v):
+        """ctypes array → list, so _wire_type_check sees a plain sequence."""
+        if v is None or isinstance(v, (str, bytes)):
+            return v
+        if hasattr(v, "__iter__"):
+            try:
+                return list(v)
+            except TypeError:
+                return v
+        return v
+
+    # ---------------- batch read ----------------
+    def read(self, addrs):
+        if not addrs:
+            return {}
+        t0  = time.perf_counter()
+        req = {a: self._type_for(a) for a in addrs}
+        try:
+            values = self.plc.read_list_by_name(req)
+            # pyads returns a list in key order; some versions return a dict.
+            # Normalise to dict either way.
+            if isinstance(values, dict):
+                result = values
+            else:
+                result = dict(zip(req.keys(), values))
+        except Exception:
+            result = {}
+            for a, pt in req.items():
+                try:
+                    result[a] = self.plc.read_by_name(a, pt)
+                except Exception as e:
+                    result[a] = f"ERR:{e}"
+        t1 = time.perf_counter()
+        self._last_sock_ms  = (t1 - t0) * 1000.0
+        self._last_parse_ms = 0.0
+        return {
+            a: _wire_type_check(self.types.get(a), self._unpack(result.get(a)))
+            for a in addrs
+        }
+
+    # ---------------- batch write ----------------
+    def write(self, values):
+        if not values:
+            return []
+        req = {a: (self._type_for(a), v) for a, v in values.items()}
+        try:
+            self.plc.write_list_by_name(req)
+            return []
+        except Exception:
+            failed = []
+            for a, (pt, v) in req.items():
+                try:
+                    self.plc.write_by_name(a, v, pt)
+                except Exception:
+                    failed.append(a)
+            return failed
+
+    # ---------------- handshake ----------------
+    def get_server_types(self):
+        # pyads does not expose a portable symbol-type query.
+        # Return None → handshake is skipped; ADS itself rejects a
+        # size mismatch with ADSError 1797, and _wire_type_check plus
+        # _validate in the bridge enforce the declared YAML type.
+        return None
 
 
 class OpcUaDriver(PlcDriver):
@@ -531,7 +648,6 @@ class OpcUaDriver(PlcDriver):
 
 class PlcApiDriver(PlcDriver):
     def __init__(self, cfg):
-        # v4.0: default matches plc_server_win.py's default
         self.instance_name = cfg.instance if cfg.instance else "296"
         self.instance = None
         self.types = {}
@@ -632,6 +748,7 @@ DRIVERS = {
     "tcp_json": TcpJsonDriver,
     "opcua":    OpcUaDriver,
     "plc_api":  PlcApiDriver,
+    "ads":      AdsDriver,
 }
 
 
@@ -685,6 +802,8 @@ class PlcRosBridge(Node):
         def make_addr(raw):
             if raw.startswith("ns="):
                 return raw
+            if raw.startswith("GVL.") or raw.startswith("MAIN."):
+                return raw
             if driver_name == "opcua":
                 return opcua_tpl.format(ns=ns, raw=raw)
             if not db:
@@ -694,7 +813,6 @@ class PlcRosBridge(Node):
                 )
             return f'{db}.{raw}'
 
-        # v4.0: strict types default True
         self.strict_types = bool(getattr(self.cfg, "strict_types", True))
 
         self.sig = {}
@@ -703,6 +821,7 @@ class PlcRosBridge(Node):
                 "addr": make_addr(s.addr),
                 "type": s.type,
                 "dir":  s.dir,
+                "length": getattr(s, "length", 1),
                 "min":  getattr(s, "min", None),
                 "max":  getattr(s, "max", None),
                 "strict": getattr(s, "strict", None),
@@ -712,9 +831,12 @@ class PlcRosBridge(Node):
         self.read_names = [n for n, s in self.sig.items() if s["dir"] == "read"]
         self._read_addrs = [self.sig[n]["addr"] for n in self.read_names]
 
-        # v4.0: wire-level type check + per-signal counters
+        # Wire-level type + length hints for the driver
         self.driver.set_signal_types(
             {s["addr"]: s["type"] for s in self.sig.values()}
+        )
+        self.driver.set_signal_lengths(
+            {s["addr"]: s["length"] for s in self.sig.values()}
         )
         self._stats = defaultdict(lambda: defaultdict(int))
 
@@ -770,8 +892,6 @@ class PlcRosBridge(Node):
         self._last_tick_end_ns = None
         self._last_written_act_ang = None
         self._last_act_write_t = 0.0
-        # Several threads publish /plc/emergency_stop (I/O + watchdog):
-        # serialise those calls. The watchdog never waits long.
         self._estop_lock = threading.Lock()
         self._deadline_miss = 0
         self._max_overrun_ms = 0.0
@@ -892,7 +1012,6 @@ class PlcRosBridge(Node):
         self.pub_conn.publish(Bool(data=state))
 
     def _run_type_handshake(self):
-        """Compare config types with server-declared types. Return False to abort."""
         if not hasattr(self.driver, "get_server_types"):
             return True
         try:
@@ -1031,7 +1150,6 @@ class PlcRosBridge(Node):
         return out
 
     def _coerce_legacy(self, s, v):
-        """v3.7 behaviour, but with NaN/Inf and int-truncation guards."""
         if v is None:
             raise ValueError("no_value")
         if isinstance(v, (list, tuple)):
@@ -1109,7 +1227,6 @@ class PlcRosBridge(Node):
                 if self.act_ang:
                     if js_fresh:
                         ang_deg = [math.degrees(float(x)) for x in self._js_rad]
-                        # v4.0: NaN/Inf guard (defense in depth)
                         if not all(math.isfinite(a) for a in ang_deg):
                             self._bump("__act_ang__", "non_finite")
                             self.log.error(
@@ -1180,8 +1297,6 @@ class PlcRosBridge(Node):
                         if (t_rd - probe_recv) <= PROBE_MAX_AGE_NS:
                             hb_val = (vals.get(self.hb_counter)
                                       if self.hb_counter else None)
-                            # v4.0: -1 marks "rejected/unavailable" (real counters
-                            # are never negative).
                             hb_out = int(hb_val) if isinstance(hb_val, int) else -1
                             self._probe.record(probe_tag, probe_recv, t_rd, hb_out)
                     if ack_to_send is not None:
