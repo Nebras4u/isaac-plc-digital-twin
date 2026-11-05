@@ -8,7 +8,7 @@ A configuration-driven digital-twin platform connecting PLC-controlled robot arm
 
 > **In one sentence:** change robot and signal configuration in YAML, connect the PLC bridge to ROS 2, and run the robot twin in Isaac Sim.
 
-![PLC, ROS 2, and Isaac Sim architecture](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/vendor-neutral/docs/images/architecture_and_latency_budget.png)
+![PLC, ROS 2, and Isaac Sim](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/yaskawa/docs/images/PLC-ROS2-ISAAC.jpg)
 
 ## Why this project is interesting
 
