@@ -1,9 +1,10 @@
 """Declarative configuration schema for plc_ros_bridge.
 
-v2.2 — industrial type-safety fields:
-  * SignalConfig: min, max, strict, reject_non_finite, allow_int_for_float
-  * BridgeConfig: strict_types, strict_type_handshake
-All new fields are optional with safe defaults, so v2.0/v2.1 configs
+v2.3 — native ADS support:
+  * DriverName: added "ads"
+  * PlcConfig: ams_net_id, ams_port (TwinCAT 3)
+  * SignalConfig: length (array size, default 1)
+All new fields are optional with safe defaults, so v2.0/v2.1/v2.2 configs
 remain loadable without changes.
 """
 from __future__ import annotations
@@ -23,11 +24,11 @@ from pydantic import (
     model_validator,
 )
 
-CURRENT_SCHEMA_VERSION = "2.2"
+CURRENT_SCHEMA_VERSION = "2.3"
 
 SignalType = Literal["bool", "int", "float", "string"]
 SignalDir = Literal["read", "write"]
-DriverName = Literal["tcp_json", "opcua", "plc_api"]
+DriverName = Literal["tcp_json", "opcua", "plc_api", "ads"]
 
 
 class ConfigError(ValueError):
@@ -41,10 +42,14 @@ class SignalConfig(BaseModel):
     type: SignalType = "float"
     dir: SignalDir = "read"
 
+    # --- v2.3: array length (1 = scalar). Defaults to 1 so v2.2 configs
+    # load unchanged. Used by AdsDriver/OpcUaDriver to read/write blocks.
+    length: int = Field(default=1, ge=1, le=65535)
+
     # --- v2.2: type/range/coercion policy (all optional) ---
     min: Optional[float] = None
     max: Optional[float] = None
-    strict: Optional[bool] = None            # None → inherit BridgeConfig.strict_types
+    strict: Optional[bool] = None
     reject_non_finite: bool = True
     allow_int_for_float: bool = True
 
@@ -88,6 +93,11 @@ class PlcConfig(BaseModel):
 
     instance: Optional[str] = None
 
+    # --- v2.3: TwinCAT 3 native ADS ---
+    ams_net_id: Optional[str] = None
+    ams_port: int = Field(default=851, ge=1, le=65535)   # PORT_TC3PLC1
+    local_ams_net_id: Optional[str] = None
+
     @model_validator(mode="after")
     def _driver_specific_required(self) -> "PlcConfig":
         if self.driver == "tcp_json":
@@ -96,6 +106,13 @@ class PlcConfig(BaseModel):
         elif self.driver == "opcua":
             if not self.endpoint:
                 raise ValueError("opcua driver requires 'plc.endpoint'")
+        elif self.driver == "ads":
+            if not self.ams_net_id:
+                raise ValueError("ads driver requires 'plc.ams_net_id'")
+            if not self.host:
+                raise ValueError("ads driver requires 'plc.host'")
+            if not self.local_ams_net_id:
+                raise ValueError("ads driver requires 'plc.local_ams_net_id'")
         return self
 
 
@@ -247,8 +264,6 @@ class BridgeConfig(BaseModel):
                 )
 
         # v2.2: cross-check publish[].type against signals[].type.
-        # Prevents /plc/axis_enable being Int32 when the signal is bool,
-        # which would surface later as a CAST failure in _publish.
         for i, p in enumerate(self.publish):
             declared = self.signals[p.signal].type
             if p.type != declared:
@@ -268,7 +283,7 @@ def _migrate(cfg: Dict[str, Any]) -> Dict[str, Any]:
     while version != CURRENT_SCHEMA_VERSION:
         fn = _MIGRATIONS.get(version)
         if fn is None:
-            if version in ("1.0", "2.0", "2.1"):
+            if version in ("1.0", "2.0", "2.1", "2.2"):
                 cfg = dict(cfg)
                 cfg["schema_version"] = CURRENT_SCHEMA_VERSION
                 version = CURRENT_SCHEMA_VERSION
