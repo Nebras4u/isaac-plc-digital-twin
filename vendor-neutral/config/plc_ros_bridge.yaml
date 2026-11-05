@@ -1,68 +1,71 @@
-# plc_ros_bridge.yaml — PRODUCTION v4.0 (schema 2.2)
+# plc_ros_bridge.yaml — PRODUCTION v4.1 (native ADS / TwinCAT 3)
 
-schema_version: "2.2"
+schema_version: "2.3"
 
 plc:
-  driver: tcp_json
-  host: 192.168.122.98
-  port: 5000
+  driver: ads
+  host: "192.168.50.1"
+  local_ams_net_id: "192.168.50.2.1.1"
+  ams_net_id: "111.111.111.3.1.1"
+  ams_port: 851
   timeout: 1.0
 
 vars:
-  ns: ""
-  db: "MAIN_KUKA_KR210_L150_L"
-  opcua_addr_template: '{ns}."{raw}"'
+  db: "GVL.MainRobotLeft"
 
 signals:
   cmd_ang:
-    addr: "MainRobotLeft_CmdAng"
+    addr: "CmdAng"
     type: float
     dir: read
+    length: 4
     min: -360.0
     max: 360.0
 
   act_ang:
-    addr: "MainRobotLeft_ActAng"
+    addr: "ActAng"
     type: float
     dir: write
+    length: 4
     min: -360.0
     max: 360.0
 
+  cmd_ack:
+    addr: "CmdAck"
+    type: bool
+    dir: write
+
+  axis_enable:
+    addr: "CmdEnable"
+    type: bool
+    dir: read
+
+  estop:
+    addr: "Emergency_Stop_Active"
+    type: bool
+    dir: read
+
+  velocity_scale:
+    addr: "Vlcty"
+    type: float
+    dir: read
+    min: 0.0
+    max: 1000.0
+
+  # --- Heartbeat (إذا كانت الأسماء صحيحة في TwinCAT) ---
   hb_counter:
-    addr: "Heartbeat_Counter"
+    addr: "GVL.Heartbeat_Counter"
     type: int
     dir: read
     min: 0
     max: 2147483647
 
   hb_ack:
-    addr: "ROS_Ack_Counter"
+    addr: "GVL.ROS_Ack_Counter"
     type: int
     dir: write
     min: 0
     max: 2147483647
-
-  cmd_ack:
-    addr: "MainRobotLeft_CmdAck"
-    type: bool
-    dir: write
-
-  axis_enable:
-    addr: "MainRobotLeft_CmdEnable"
-    type: bool
-    dir: read
-
-  estop:
-    addr: "MainRobotLeft_Emergency_Stop_Active"
-    type: bool
-    dir: read
-
-  velocity_scale:
-    addr: "MainRobotLeft_Vlcty"
-    type: float
-    dir: read
-    min: 0.0
-    max: 1000.0
 
 robot:
   joints: [joint_1, joint_2, joint_3, joint_4]
