@@ -1,105 +1,228 @@
-# plc_ros_bridge.yaml — PRODUCTION v4.1 (native ADS / TwinCAT 3)
-
+# plc_ros_bridge.yaml — Unified Config (Snap7 / ADS / TCP-JSON / OPC UA)
+# Switch drivers by editing only the top-level `driver:` key.
+# Each driver block inherits `defaults` unless it overrides a key.
 schema_version: "2.3"
 
-plc:
-  driver: ads
-  host: "192.168.50.1"
-  local_ams_net_id: "192.168.50.2.1.1"
-  ams_net_id: "111.111.111.3.1.1"
-  ams_port: 851
-  timeout: 1.0
+# ---------------------------------------------------------------------------
+# Active driver — change this single line to switch PLC backend:
+#   "snap7"    -> Siemens S7 via S7comm (python-snap7 >= 3.0)
+#   "ads"      -> Beckhoff TwinCAT 3 via ADS (pyads)
+#   "tcp_json" -> Any PLC fronted by plc_server_win7.py (JSON over TCP)
+#   "opcua"    -> OPC UA server (S7-1500, PLCSIM Advanced, TwinCAT, ...)
+# ---------------------------------------------------------------------------
+driver: "ads"
 
-vars:
-  db: "GVL.MainRobotLeft"
+# ===========================================================================
+# Shared defaults (merged with the active driver block)
+# ===========================================================================
+defaults: &defaults
+  poll_hz: 60
+  watchdog_timeout: 4.0
+  backoff_max: 30.0
+  warn_cooldown: 60.0
+  strict_types: true
+  strict_type_handshake: false
+  estop_forwarding_required: true
+  latency_probe: true
+  latency_probe_file: "/workspace/plc_latency.csv"
+  logging:
+    level: INFO
+    console: true
+    to_ros: true
+    file: "/workspace/plc_bridge_logs/bridge.log"
+    json_file: "/workspace/plc_bridge_logs/bridge.jsonl"
+    max_bytes: 10485760
+    backup_count: 5
 
-signals:
-  cmd_ang:
-    addr: "CmdAng"
-    type: float
-    dir: read
-    length: 4
-    min: -360.0
-    max: 360.0
+# ===========================================================================
+# Siemens S7 (Snap7) — target: S7-1500 in PLCSIM Advanced
+# ===========================================================================
+snap7:
+  plc:
+    driver: snap7
+    host: "192.168.99.56"
+    rack: 0
+    slot: 1
+    timeout: 1.0
+  vars:
+    db: ""    # Snap7 uses absolute addressing (db_num + byte_offset)
+  signals:
+    cmd_ang_1: {addr: "DB2.DBD216", type: float, dir: read,  db_num: 2, byte_offset: 216, s7_type: lreal}
+    cmd_ang_2: {addr: "DB2.DBD224", type: float, dir: read,  db_num: 2, byte_offset: 224, s7_type: lreal}
+    cmd_ang_3: {addr: "DB2.DBD232", type: float, dir: read,  db_num: 2, byte_offset: 232, s7_type: lreal}
+    cmd_ang_4: {addr: "DB2.DBD240", type: float, dir: read,  db_num: 2, byte_offset: 240, s7_type: lreal}
 
-  act_ang:
-    addr: "ActAng"
-    type: float
-    dir: write
-    length: 4
-    min: -360.0
-    max: 360.0
+    act_ang_1: {addr: "DB2.DBD152", type: float, dir: write, db_num: 2, byte_offset: 152, s7_type: lreal}
+    act_ang_2: {addr: "DB2.DBD160", type: float, dir: write, db_num: 2, byte_offset: 160, s7_type: lreal}
+    act_ang_3: {addr: "DB2.DBD168", type: float, dir: write, db_num: 2, byte_offset: 168, s7_type: lreal}
+    act_ang_4: {addr: "DB2.DBD176", type: float, dir: write, db_num: 2, byte_offset: 176, s7_type: lreal}
 
-  cmd_ack:
-    addr: "CmdAck"
-    type: bool
-    dir: write
+    hb_counter: {addr: "DB2.DBD1020", type: int, dir: read,  db_num: 2, byte_offset: 1020, s7_type: int32}
+    hb_ack:     {addr: "DB2.DBD1036", type: int, dir: write, db_num: 2, byte_offset: 1036, s7_type: int32}
 
-  axis_enable:
-    addr: "CmdEnable"
-    type: bool
-    dir: read
+    cmd_ack:       {addr: "DB2.DBX1018.0", type: bool, dir: write, db_num: 2, byte_offset: 1018, bit_offset: 0}
+    axis_enable:   {addr: "DB2.DBX1062.1", type: bool, dir: read,  db_num: 2, byte_offset: 1062, bit_offset: 1}
+    estop:         {addr: "DB2.DBX988.1",  type: bool, dir: read,  db_num: 2, byte_offset: 988,  bit_offset: 1}
+    motion_active: {addr: "DB2.DBX988.0",  type: bool, dir: read,  db_num: 2, byte_offset: 988,  bit_offset: 0}
+    group_fault:   {addr: "DB2.DBX280.2",  type: bool, dir: read,  db_num: 2, byte_offset: 280,  bit_offset: 2}
 
-  estop:
-    addr: "Emergency_Stop_Active"
-    type: bool
-    dir: read
+    velocity_scale: {addr: "DB2.DBD112",  type: float, dir: read, db_num: 2, byte_offset: 112,  s7_type: lreal}
+    comm_state:     {addr: "DB2.DBW1054", type: int,   dir: read, db_num: 2, byte_offset: 1054, s7_type: int16}
 
-  velocity_scale:
-    addr: "Vlcty"
-    type: float
-    dir: read
-    min: 0.0
-    max: 1000.0
+  robot:
+    joints: [joint_1, joint_2, joint_3, joint_4]
+    cmd_ang: [cmd_ang_1, cmd_ang_2, cmd_ang_3, cmd_ang_4]
+    act_ang: [act_ang_1, act_ang_2, act_ang_3, act_ang_4]
+    cmd_ack: cmd_ack
+    cmd_ang_topic: "/plc/cmd_ang"
+    joint_states_topic: "/joint_states"
 
-  # --- Heartbeat (إذا كانت الأسماء صحيحة في TwinCAT) ---
-  hb_counter:
-    addr: "GVL.Heartbeat_Counter"
-    type: int
-    dir: read
-    min: 0
-    max: 2147483647
+  heartbeat:
+    counter: hb_counter
+    ack: hb_ack
 
-  hb_ack:
-    addr: "GVL.ROS_Ack_Counter"
-    type: int
-    dir: write
-    min: 0
-    max: 2147483647
+  publish:
+    - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
+    - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
+    - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
+    - {signal: motion_active,  topic: "/plc/motion_active",  type: bool}
+    - {signal: group_fault,    topic: "/plc/group_fault",    type: bool}
 
-robot:
-  joints: [joint_1, joint_2, joint_3, joint_4]
-  cmd_ang: [cmd_ang]
-  act_ang: [act_ang]
-  cmd_ack: cmd_ack
-  cmd_ang_topic: "/plc/cmd_ang"
-  joint_states_topic: "/joint_states"
+# ===========================================================================
+# Beckhoff TwinCAT 3 (ADS) — target: CX/PC at 192.168.122.215
+# ===========================================================================
+ads:
+  plc:
+    driver: ads
+    host: "192.168.122.215"
+    local_ams_net_id: "192.168.122.1.1.1"
+    ams_net_id: "192.168.122.215.1.1"
+    ams_port: 851
+    timeout: 1.0
+  vars:
+    db: ""
+  signals:
+    cmd_ang:        {addr: "GVL.MainRobotLeft_CmdAng",   type: float, dir: read,  length: 4}
+    act_ang:        {addr: "GVL.MainRobotLeft_ActAng",   type: float, dir: write, length: 4}
+    axis_enable:    {addr: "GVL.MainRobotLeft_CmdEnable", type: bool, dir: read}
+    estop:          {addr: "GVL.MainRobotLeft_Emergency_Stop_Active", type: bool, dir: read}
+    motion_active:  {addr: "GVL.MainRobotLeft_Motion_Active", type: bool, dir: read}
+    group_fault:    {addr: "GVL.MainRobotLeft_Group_Fault",   type: bool, dir: read}
+    velocity_scale: {addr: "GVL.MainRobotLeft_Vlcty",    type: float, dir: read}
+    test_mode:      {addr: "GVL.Test_Mode",              type: bool,  dir: read}
+    cmd_ack:        {addr: "GVL.MainRobotLeft_CmdAck",   type: bool,  dir: write}
+    hb_counter:     {addr: "GVL.Heartbeat_Counter",      type: int,   dir: read}
+    hb_ack:         {addr: "GVL.ROS_Ack_Counter",        type: int,   dir: write}
+    comm_state:     {addr: "GVL.Comm_State",             type: int,   dir: read}
 
-heartbeat:
-  counter: hb_counter
-  ack: hb_ack
+  robot:
+    joints: [joint_1, joint_2, joint_3, joint_4]
+    cmd_ang: [cmd_ang]
+    act_ang: [act_ang]
+    cmd_ack: cmd_ack
+    cmd_ang_topic: "/plc/cmd_ang"
+    joint_states_topic: "/joint_states"
 
-publish:
-  - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
-  - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
-  - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
+  heartbeat:
+    counter: hb_counter
+    ack: hb_ack
 
-poll_hz: 200
-watchdog_timeout: 4.0
-backoff_max: 30.0
-warn_cooldown: 60.0
+  publish:
+    - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
+    - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
+    - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
+    - {signal: motion_active,  topic: "/plc/motion_active",  type: bool}
+    - {signal: group_fault,    topic: "/plc/group_fault",    type: bool}
+    - {signal: test_mode,      topic: "/plc/test_mode",      type: bool}
+    - {signal: comm_state,     topic: "/plc/comm_state",     type: int}
 
-strict_types: true
-strict_type_handshake: true
+# ===========================================================================
+# Siemens via TCP/JSON — target: plc_server_win7.py at 192.168.99.52:5000
+# ===========================================================================
+tcp_json:
+  plc:
+    driver: tcp_json
+    host: "192.168.99.52"
+    port: 5000
+    timeout: 1.0
+  vars:
+    db: "MAIN_KUKA_KR210_L150_L"
+  signals:
+    cmd_ang_1: {addr: "MainRobotLeft_CmdAng[1]", type: float, dir: read}
+    cmd_ang_2: {addr: "MainRobotLeft_CmdAng[2]", type: float, dir: read}
+    cmd_ang_3: {addr: "MainRobotLeft_CmdAng[3]", type: float, dir: read}
+    cmd_ang_4: {addr: "MainRobotLeft_CmdAng[4]", type: float, dir: read}
 
-latency_probe: true
-latency_probe_file: "/tmp/plc_latency.csv"
+    act_ang_1: {addr: "MainRobotLeft_ActAng[1]", type: float, dir: write}
+    act_ang_2: {addr: "MainRobotLeft_ActAng[2]", type: float, dir: write}
+    act_ang_3: {addr: "MainRobotLeft_ActAng[3]", type: float, dir: write}
+    act_ang_4: {addr: "MainRobotLeft_ActAng[4]", type: float, dir: write}
 
-logging:
-  level: INFO
-  console: true
-  to_ros: false
-  file: "/workspace/plc_bridge_logs/bridge.log"
-  json_file: "/workspace/plc_bridge_logs/bridge.jsonl"
-  max_bytes: 10485760
-  backup_count: 5
+    hb_counter:     {addr: "Heartbeat_Counter",                   type: int,  dir: read}
+    hb_ack:         {addr: "ROS_Ack_Counter",                     type: int,  dir: write}
+    cmd_ack:        {addr: "MainRobotLeft_CmdAck",                type: bool, dir: write}
+    axis_enable:    {addr: "MainRobotLeft_CmdEnable",             type: bool, dir: read}
+    estop:          {addr: "MainRobotLeft_Emergency_Stop_Active", type: bool, dir: read}
+    velocity_scale: {addr: "MainRobotLeft_Vlcty",                 type: float, dir: read}
+
+  robot:
+    joints: [joint_1, joint_2, joint_3, joint_4]
+    cmd_ang: [cmd_ang_1, cmd_ang_2, cmd_ang_3, cmd_ang_4]
+    act_ang: [act_ang_1, act_ang_2, act_ang_3, act_ang_4]
+    cmd_ack: cmd_ack
+    cmd_ang_topic: "/plc/cmd_ang"
+    joint_states_topic: "/joint_states"
+
+  heartbeat:
+    counter: hb_counter
+    ack: hb_ack
+
+  publish:
+    - {signal: estop,          topic: "/plc/emergency_stop", type: bool}
+    - {signal: axis_enable,    topic: "/plc/axis_enable",    type: bool}
+    - {signal: velocity_scale, topic: "/plc/velocity_scale", type: float}
+
+# ===========================================================================
+# OPC UA — target: S7-1500 / PLCSIM Advanced / TwinCAT OPC UA server
+# ===========================================================================
+opcua:
+  plc:
+    driver: opcua
+    endpoint: "opc.tcp://192.168.99.56:4840"
+    timeout: 0.5
+    # user: "operator"
+    # password: "secret"
+  vars:
+    ns: 'ns=3;s="MAIN_KUKA_KR210_L150_L"'
+    db: "MAIN_KUKA_KR210_L150_L"
+    opcua_addr_template: '{ns}."{raw}"'
+  signals:
+    cmd_ang:         {addr: "MainRobotLeft_CmdAng",               type: float, dir: read,  length: 4}
+    act_ang:         {addr: "MainRobotLeft_ActAng",               type: float, dir: write, length: 4}
+    cmd_enable:      {addr: "MainRobotLeft_CmdEnable",            type: bool,  dir: read}
+    velocity:        {addr: "MainRobotLeft_Vlcty",                type: float, dir: read}
+    estop:           {addr: "MainRobotLeft_Emergency_Stop_Active", type: bool, dir: read}
+    hb_counter:      {addr: "Heartbeat_Counter",                  type: int,   dir: read}
+    comm_state:      {addr: "Comm_State",                         type: int,   dir: read}
+    ros_alive:       {addr: "ROS_Alive",                          type: bool,  dir: read}
+    cmd_ack:         {addr: "MainRobotLeft_CmdAck",               type: bool,  dir: write}
+    ros_ack_counter: {addr: "ROS_Ack_Counter",                    type: int,   dir: write}
+
+  robot:
+    joints: [joint_1, joint_2, joint_3, joint_4]
+    cmd_ang: [cmd_ang]
+    act_ang: [act_ang]
+    cmd_ack: cmd_ack
+    cmd_ang_topic: "/plc/cmd_ang"
+    joint_states_topic: "/joint_states"
+
+  heartbeat:
+    counter: hb_counter
+    ack: ros_ack_counter
+
+  publish:
+    - {signal: velocity,   topic: "/plc/velocity",       type: float}
+    - {signal: cmd_enable, topic: "/plc/axis_enable",    type: bool}
+    - {signal: estop,      topic: "/plc/emergency_stop", type: bool}
+    - {signal: ros_alive,  topic: "/plc/ros_alive",      type: bool}
+    - {signal: comm_state, topic: "/plc/comm_state",     type: int}
