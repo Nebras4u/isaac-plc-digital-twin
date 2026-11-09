@@ -32,7 +32,7 @@ from Siemens.Simatic.Simulation.Runtime import (
     SimulationRuntimeException,
 )
 
-INSTANCE_NAME = os.environ.get("PLC_INSTANCE", "296")
+INSTANCE_NAME = os.environ.get("PLC_INSTANCE", "297")
 instance = SimulationRuntimeManager.CreateInterface(INSTANCE_NAME)
 print(f"Connected to PLCSIM: {instance.Name}, State: {instance.OperatingState}")
 
@@ -78,6 +78,7 @@ TAGS = {
     f"{DB}.ROS_Alive":         BOOL,
     f"{DB}.Comm_State":        INT,
     f"{DB}.HB_Timeout_Mult":   INT,
+    f"{DB}.Test_Mode":         BOOL,
     f"{DB}.Comm_LostCount":    DINT,
 }
 
@@ -230,6 +231,10 @@ def _get_value(dv, t):
     return _PY_CAST[t](getattr(holder, _VALUE_ATTR[t]))
 
 
+_ARR_CACHE = {}               # (kind, ((name, type), ...)) -> SDataValueByName[]
+_ARR_LOCK = threading.Lock()  # cached arrays are shared between client threads
+
+
 def _build_array(items, with_values):
     S, A = _B["S"], _B["A"]
     arr = A[S](len(items))
@@ -252,17 +257,46 @@ def _build_array(items, with_values):
     return arr
 
 
+def _fill_values(arr, items):
+    """Update only the values of a pre-built array (names/types are kept)."""
+    nested = _B["nested"]
+    for i, it in enumerate(items):
+        t = it[1]
+        v = _PY_CAST[t](it[2])
+        sig = arr[i]
+        dv = sig.DataValue
+        if nested:
+            inner = dv.Value
+            setattr(inner, _VALUE_ATTR[t], v)
+            dv.Value = inner
+        else:
+            setattr(dv, _VALUE_ATTR[t], v)
+        sig.DataValue = dv
+        arr[i] = sig
+
+
+def _cached_array(kind, items):
+    """Build the SDataValueByName[] once per distinct (names, types) list."""
+    key = (kind, tuple((it[0], it[1]) for it in items))
+    arr = _ARR_CACHE.get(key)
+    if arr is None:
+        arr = _build_array(items, with_values=False)
+        _ARR_CACHE[key] = arr
+    return arr
+
+
 def _batch_read(items):
     t0 = time.perf_counter() if TIMING else 0.0
-    arr = _build_array(items, with_values=False)
-    instance.ReadSignals(arr)
-    out = []
-    for i, (name, t) in enumerate(items):
-        sig = arr[i]
-        if _code_ok(sig.ErrorCode):
-            out.append(_get_value(sig.DataValue, t))
-        else:
-            out.append(f"ERR:{sig.ErrorCode}")
+    with _ARR_LOCK:
+        arr = _cached_array("r", items)
+        instance.ReadSignals(arr)
+        out = []
+        for i, (name, t) in enumerate(items):
+            sig = arr[i]
+            if _code_ok(sig.ErrorCode):
+                out.append(_get_value(sig.DataValue, t))
+            else:
+                out.append(f"ERR:{sig.ErrorCode}")
     if TIMING:
         _rec("api_read_batch", (time.perf_counter() - t0) * 1000.0)
     return out
@@ -270,9 +304,11 @@ def _batch_read(items):
 
 def _batch_write(items):
     t0 = time.perf_counter() if TIMING else 0.0
-    arr = _build_array(items, with_values=True)
-    instance.WriteSignals(arr)
-    out = [_code_ok(arr[i].ErrorCode) for i in range(len(items))]
+    with _ARR_LOCK:
+        arr = _cached_array("w", items)
+        _fill_values(arr, items)
+        instance.WriteSignals(arr)
+        out = [_code_ok(arr[i].ErrorCode) for i in range(len(items))]
     if TIMING:
         _rec("api_write_batch", (time.perf_counter() - t0) * 1000.0)
     return out
