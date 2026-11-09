@@ -5,9 +5,156 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
----
-
 ## [Unreleased]
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 4
+
+### Added
+
+- **Four-transport protocol comparison (ADS / OPC UA / Snap7 / TCP-JSON).**
+  Measured the **full-loop cycle** (`cycle_ns = write_done_ns - t_rs`,
+  i.e. PLC → ROS → Isaac → ROS → PLC) on the Docker/VM environment.
+  Results are published in the top-level `README.md` under
+  **Protocol Comparison (Measured — v4.0, Docker/VM)**, together with
+  the LBP table and the `cycle_ns` definition. The reference-machine
+  numbers (5.2 ms mean, v3.1.2) are a **different metric** and remain
+  in the **Latency Performance** section — rows must not be compared
+  across the two sections.
+
+  **Key finding (Docker/VM, `cycle_ns` in ms):**
+
+  | Transport         | Rows  | Mean      | p50   | p95   | p99   | Max     |
+  | :---------------- | ----: | --------: | ----: | ----: | ----: | ------: |
+  | **Snap7** (S7)    | ~1.5k | **23.11** | 19.58 | 37.74 | 39.35 | 53.64   |
+  | **TCP-JSON**      | ~2.1k | **23.28** | 19.20 | 37.70 | 40.55 | 200.64  |
+  | **OPC UA**        | ~3.0k | **36.54** | 38.04 | 41.87 | 42.87 | 178.78  |
+  | **ADS** (TwinCAT) | ~1.3k | **40.21** | 40.97 | 49.33 | 52.87 | 64.96   |
+
+  - **Snap7 and TCP-JSON** are statistically tied (mean ≈ 23 ms,
+    p50 ≈ 19 ms) and **bimodal** (a ~19–22 ms fast cluster plus a
+    ~35–40 ms slower cluster, depending on whether `act_ang` was
+    written in the same tick). Snap7 has the tighter tail
+    (Max 53.64 ms vs 200.64 ms), making it the cleaner choice when
+    a **hard upper bound** on cycle time matters.
+  - **OPC UA** has a higher p50 (38.04 ms) but catastrophic outliers
+    up to 178.78 ms (likely reconnect/GC).
+  - **ADS** has the highest mean (40.21 ms) but the tightest range
+    (19.8–65.0 ms) — the extra hops through the AMS router raise the
+    baseline, but the transport is the most stable in this run.
+
+- **`vendor-neutral/docs/latency_comparison.md`** — extended with the
+  full-loop `cycle_ns` section for all four transports (mean, p50,
+  p95, p99, Max, and LBP table). Explicitly labelled as a **different
+  metric** from the historical `cmd_to_feedback` numbers.
+
+### Changed
+
+- **`README.md` — new top-level section `Protocol Comparison
+  (Measured — v4.0, Docker/VM)`.** The `Latency Performance` table now
+  points its **ADS** row to that section and adds a note that the
+  metric is different. The reference-machine numbers (5.2 ms mean,
+  v3.1.2) are unchanged and remain clearly scoped to the reference
+  machine.
+- **`README.md` — `Environment` section** now states explicitly that
+  the v3.7/v4.0 measurements **and** the four-transport comparison were
+  run on Docker/VM, and the reference machine has not been re-measured
+  with `cycle_ns`.
+- **`README.md` — `Active Development` highlights** now list five
+  transports (`tcp_json`, `opcua`, `plc_api`, `ads`, `snap7`), update
+  schema to v2.3, and quote the four-transport `cycle_ns` means.
+- **`README.md` — `Future Vision`** now marks ADS and Snap7 as
+  **Implemented & measured** with their `cycle_ns` figures.
+- **`README.md` — Quick Start** mentions `driver: "snap7"` alongside
+  `driver: "ads"`.
+- **`CHANGELOG.md` — `Summary of Generations`** table now includes
+  `v4.1.0` (ADS) and `v4.2.0` (Snap7 + protocol comparison).
+
+### Fixed
+
+- **`CHANGELOG.md` — Markdown rendering.** The `Repository Layout`,
+  `Quick Start`, and `Summary of Generations` blocks are now wrapped
+  in four-backtick fences (` ```` `) so their inner triple-backtick
+  content cannot accidentally close the fence and swallow the rest of
+  the document. The literal `---` horizontal rules are separated from
+  adjacent code fences by a blank line.
+
+### Migration Notes
+
+- No config schema change (still v2.3).
+- No ROS graph change.
+- No code change — this entry is documentation only.
+
+## [4.2.0] — 2026-11-01 — Siemens S7 (Snap7) Transport + Protocol Comparison
+
+**Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 4
+
+### Added
+
+- **`snap7` transport** — native S7comm via `python-snap7 >= 3.0`,
+  implemented in `Snap7Driver` in `plc_ros_bridge.py`. Connects to
+  Siemens S7-1500 (and compatible S7-1200/300/400) using
+  `rack`/`slot` from `PlcConfig`. Reads are grouped by DB, one
+  `db_read` per group; writes use `db_write` per signal.
+
+- **`bridge_config.py` — Schema v2.5.**
+  - New `PlcConfig.rack` (0–7, default `0`) and `PlcConfig.slot`
+    (0–31, default `1`).
+  - New `SignalConfig.db_num` (1–65535), `byte_offset` (0–65535),
+    `bit_offset` (0–7, default `0`).
+  - New `SignalConfig.s7_type`
+    (`'bool' | 'int16' | 'int32' | 'lreal'`), overriding the generic
+    YAML `type` at decode time so Int vs DInt and the correct
+    `snap7.util` decoder can be selected.
+  - Consistency checks: `s7_type='bool'` requires `type='bool'`;
+    `s7_type in ('int16','int32')` requires `type='int'`;
+    `s7_type='lreal'` requires `type='float'`.
+  - `driver: snap7` requires `plc.host`.
+
+- **`plc_ros_bridge.yaml` — Snap7 driver block.** Absolute DB
+  addressing:
+  `db_num`, `byte_offset`, `bit_offset`, and `s7_type` set for every
+  signal. The active driver remains `opcua` in the checked-in file;
+  switching to `driver: "snap7"` requires only the one-line edit.
+
+- **`docs/latency_comparison.md` — full-loop `cycle_ns` section**
+  covering Snap7, TCP-JSON, OPC UA, and ADS. See `README.md`
+  **Protocol Comparison** for the table.
+
+### Changed
+
+- **`README.md` — `Protocol Comparison`** section added (see
+  `[Unreleased]` above for the numbers).
+- **`README.md` — `Active Development`** now lists five transports
+  and schema v2.3.
+- **`README.md` — `Future Vision`** marks Snap7 as
+  **Implemented & measured**.
+- **`CHANGELOG.md` — `Summary of Generations`** now includes
+  `v4.2.0`.
+
+### Performance (Docker/VM, `cycle_ns`)
+
+| Metric   | Value      |
+| :------- | :--------- |
+| Mean     | 23.11 ms   |
+| p50      | 19.58 ms   |
+| p95      | 37.74 ms   |
+| p99      | 39.35 ms   |
+| Max      | 53.64 ms   |
+| Rows     | ~1.5k      |
+
+Probe health: `probe_rejected == 0`, `probe_order_violations == 0`
+across the full run.
+
+### Migration Notes
+
+- Config schema **v2.3 → v2.5** is in-memory; no YAML edit is required
+  for load. Every new Snap7 field is optional and only consulted when
+  `driver: "snap7"` is active.
+- `snap7` requires `pip install python-snap7>=3.0`; the bridge raises
+  a clear `RuntimeError` if the import fails.
+- No change for `tcp_json`, `opcua`, `plc_api`, or `ads` users.
+
+## [4.1.0] — 2026-10-31 — Beckhoff TwinCAT 3 (ADS) Support
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 4
 
@@ -23,10 +170,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a troubleshooting table (errors 6, 7, 13, 1800, 1861, 0x12).
 - **Connection, read, and write verified** between Linux (Ubuntu 24.04,
   pyads) and Windows (TwinCAT 3.1, Build 4024.x).
-- **Docker verification:** The ADS connection has been tested inside the
-  `isaac_reference_v3` container (`--network host`). All 4 pytest tests
-  pass in 0.04 s. This confirms that `pyads` works reliably in Docker,
-  avoiding the intermittent `pyads` timeouts observed on native Linux.
+- **Docker verification:** the ADS connection has been tested inside
+  the `isaac_reference_v3` container (`--network host`). All 4 pytest
+  tests pass in 0.04 s. This confirms that `pyads` works reliably in
+  Docker, avoiding the intermittent `pyads` timeouts observed on native
+  Linux.
 
 ### Notes
 
@@ -36,7 +184,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `C:\TwinCAT\3.1\Target\StaticRoutes.xml` on the Windows machine.
 - ADS is unencrypted; use an isolated network or direct cable.
 
----
+### Performance (Docker/VM, `cycle_ns`)
+
+| Metric   | Value      |
+| :------- | :--------- |
+| Mean     | 40.21 ms   |
+| p50      | 40.97 ms   |
+| p95      | 49.33 ms   |
+| p99      | 52.87 ms   |
+| Max      | 64.96 ms   |
+| Rows     | ~1.3k      |
+
+Probe health: `probe_rejected == 0`, `probe_order_violations == 0`
+across the full run.
 
 ## [4.0.0] — 2026-10-29 — Industrial Type-Safety Overhaul
 
@@ -227,15 +387,13 @@ are environmental (Windows/VM scheduling, Defender).
 
 ### Known Limitations (added in v4.0)
 
-| ID | Limitation |
-| :--- | :--- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-23 | `signal_rejections_total` on the `tick_stats` line is cumulative since process start. A non-zero value after startup may indicate a persistent bad signal; check the JSONL log for the per-signal breakdown. |
 | VL-24 | `strict_type_handshake: true` requires `plc_server_win.py` v4.0. Against a v3.3 server the bridge logs `type_handshake_unavailable` and does **not** abort. |
 | VL-25 | In `strict_types=True`, a string-formatted number (`"5.0"`) sent to an `int` signal is rejected, not parsed. |
 | VL-26 | The `_wire_type_check` widening rule (`float` accepts `int`) is controlled by `allow_int_for_float` (default `True`). |
 | VL-27 | `nan` in `/joint_states` position now triggers `joint_angles_non_finite` and skips the write. May delay `act_ang` update by one tick. |
-
----
 
 ## [3.7.0] — 2026-10-28 — Probe Observability + Production Path
 
@@ -390,8 +548,8 @@ for v3.7.
 
 ### Known Limitations (added in v3.7)
 
-| ID | Limitation |
-| :--- | :--- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-20 | `probe_sent = 0` when `cmd_ang: []` in YAML. `probe_attempted` covers external tag sources. |
 | VL-21 | `write_failed` on `CmdAck` if the PLC rejects the write. Verify `CmdEnable=TRUE` and `Emergency_Stop_Active=FALSE`. |
 | VL-22 | `write_net` p99 remains ~40 ms on the VM (TCP tail on libvirt). Reduce with a direct network cable, `chrt -f 50`, or `poll_hz: 150`. |
@@ -407,8 +565,6 @@ for v3.7.
   with `PLC_BATCH=1`.
 - **`DEFAULT_PUBLISH_HZ = 120.0`** — revert to 60.0 if `isaac_step`
   jitter is a problem.
-
----
 
 ## [3.6.0] — 2026-10-28 — Latency-Probe Chain Fixes
 
@@ -436,8 +592,6 @@ for v3.7.
 Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 7-part `frame_id`s respectively.
 
----
-
 ## [3.5.0] — 2026-10-28 — Trajectory Twin Fixes
 
 **Location:** [`vendor-neutral/`](vendor-neutral/) — Gen 3
@@ -454,8 +608,6 @@ Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 
 - **`test_trajectory_twin.py`** — initial expansion (later grew to 25
   tests in v3.7).
-
----
 
 ## [3.1.3] — 2026-10-26 — PLC Batch Mode + 120 Hz Tuning
 
@@ -517,8 +669,8 @@ Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 
 ### Known Limitations (added)
 
-| ID | Limitation |
-| :--- | :--- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-17 | `isaac_step` (~9.71 ms p50) is now the largest single contributor on the Docker/VM. |
 | VL-18 | `poll_hz: 120` requires batch mode in the PLC server. |
 | VL-19 | The reference machine has **not** been re-measured with v3.1.3. |
@@ -528,8 +680,6 @@ Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 - No config schema change (still v2.1).
 - No ROS graph change.
 - To disable batch: `PLC_BATCH=0` in the environment.
-
----
 
 ## [3.1.2] — 2026-10-25 — Performance Fixes for VM Environments
 
@@ -559,8 +709,8 @@ Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 
 ### Known Limitations
 
-| ID | Limitation |
-| :--- | :--- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-12 | `write_net` is ~12 ms on the VM. Reduce by switching to `plc_api` driver. |
 | VL-13 | `isaac_step` is ~10 ms on the VM. Reduce by enabling GPU passthrough. |
 | VL-14 | One 103 s Isaac Sim stall observed. Excluded from filtered statistics. |
@@ -570,8 +720,6 @@ Both `/servo_setpoints` and `/joint_states` now carry 6-part and
 ### Migration Notes
 
 No migration is required. The config schema is unchanged (v2.1).
-
----
 
 ## [3.1.1] — 2026-10-23 — Environment Transparency and Real VM Results
 
@@ -597,13 +745,11 @@ No migration is required. The config schema is unchanged (v2.1).
 
 ### Known Limitations
 
-| ID | Limitation |
-| :--- | :--- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-01 | ~~KRC twin reads config inline~~ — resolved by `trajectory_twin.py` |
 | VL-06 | Fixes above verified with stubbed ROS 2 / Ruckig only |
 | VL-07 | No automated tests yet for the planner state machine |
-
----
 
 ## [3.1.0] — 2026-10-21 — Production-Grade Config
 
@@ -623,8 +769,6 @@ No migration is required. The config schema is unchanged (v2.1).
 ### Changed
 
 - `bridge_config.py` is now the canonical schema definition.
-
----
 
 ## [3.0.0] — 2026-10-10 — Vendor-Neutral Platform
 
@@ -653,15 +797,13 @@ No migration is required. The config schema is unchanged (v2.1).
 
 ### Known Limitations (v3.0.0)
 
-| ID    | Limitation                                                        |
-| :---- | :---------------------------------------------------------------- |
+| ID    | Limitation |
+| :---- | :--------- |
 | VL-01 | KRC twin still reads config inline; `robot.yaml` not consumed yet |
-| VL-02 | Yaskawa GP110 end-to-end verification pending                     |
-| VL-03 | No Cartesian motion or inverse kinematics layer                   |
-| VL-04 | No real-time guarantees (no PREEMPT_RT)                           |
-| VL-05 | No authentication on `tcp_json` transport                         |
-
----
+| VL-02 | Yaskawa GP110 end-to-end verification pending |
+| VL-03 | No Cartesian motion or inverse kinematics layer |
+| VL-04 | No real-time guarantees (no PREEMPT_RT) |
+| VL-05 | No authentication on `tcp_json` transport |
 
 ## [2.0.0] — 2026-10-07 — Yaskawa Modular
 
@@ -683,8 +825,6 @@ No migration is required. The config schema is unchanged (v2.1).
 - **Hidden A5 problem** — root cause: `A5 != 0` introduces horizontal
   offset = `LF * sin(A5)`. Solution: `A5 = -(A1 + A4)` for tool-down
   orientation.
-
----
 
 ## [1.0.0] — 2026-09-15 — KUKA KR210 Full Digital Twin
 
@@ -718,8 +858,6 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 - Asymmetry Bound: ±16.0 µs
 - RTT min: 32.0 µs
 
----
-
 ## [0.1.0] — 2026-09-10 — Initial Prototype
 
 **Location:** archived
@@ -734,28 +872,26 @@ Maximum error: **0.0254°** (joint_2, full gravity load).
 
 - Superseded by 1.0.0 (full KUKA digital twin).
 
----
-
 ## Summary of Generations
 
-| Version    | Robot         | Transport         | Architecture                                                       | Location              |
-| :--------- | :------------ | :---------------- | :----------------------------------------------------------------- | :-------------------- |
-| v0.1.0     | KUKA KR210    | TCP/JSON          | Monolithic                                                         | (superseded)          |
-| v1.0.0     | KUKA KR210    | TCP/JSON          | 5 processes                                                        | `kuka/`               |
-| v2.0.0     | Yaskawa GP110 | OPC UA            | Modular (6 files)                                                  | `yaskawa/`            |
-| **v3.0.0** | **Any robot** | **Any transport** | **Vendor-neutral**                                                 | **`vendor-neutral/`** |
-| **v3.1.0** | **Any robot** | **Any transport** | **+ Pydantic v2 + 26 tests**                                       | **`vendor-neutral/`** |
-| **v3.1.1** | **Any robot** | **Any transport** | **+ environment transparency + 29 tests**                          | **`vendor-neutral/`** |
-| **v3.1.2** | **Any robot** | **Any transport** | **+ threaded PLC I/O + BEST_EFFORT QoS**                           | **`vendor-neutral/`** |
-| **v3.1.3** | **Any robot** | **Any transport** | **+ batch PLC I/O + poll_hz 120 (18.55 ms)**                       | **`vendor-neutral/`** |
-| **v3.5.0** | **Any robot** | **Any transport** | **+ trajectory_twin fixes**                                        | **`vendor-neutral/`** |
-| **v3.6.0** | **Any robot** | **Any transport** | **+ probe chain fixes (100% capture)**                             | **`vendor-neutral/`** |
-| **v3.7.0** | **Any robot** | **Any transport** | **+ probe_attempted + joint_mapper.py + 51+8 tests + 14.48 ms**    | **`vendor-neutral/`** |
-| **v4.0.0** | **Any robot** | **Any transport** | **+ industrial type-safety (schema v2.2, min/max/strict, type **   | **`vendor-neutral/`** |
-|            |               |                   |  ** handshake, NaN guards), 86+9 tests, +0.01 ms p99 vs v3.7**     |                       |
-| **v4.1.0** | **Any robot** | **+ ADS (Beckhoff TwinCAT 3)** | **+ Beckhoff TwinCAT 3 support via pyads; full setup & troubleshooting guide** | **`vendor-neutral/`** |
-
----
+| Version    | Robot         | Transport                                                       | Architecture                                                                 | Location              |
+| :--------- | :------------ | :-------------------------------------------------------------- | :--------------------------------------------------------------------------- | :-------------------- |
+| v0.1.0     | KUKA KR210    | TCP/JSON                                                        | Monolithic                                                                   | (superseded)          |
+| v1.0.0     | KUKA KR210    | TCP/JSON                                                        | 5 processes                                                                  | `kuka/`               |
+| v2.0.0     | Yaskawa GP110 | OPC UA                                                          | Modular (6 files)                                                            | `yaskawa/`            |
+| **v3.0.0** | **Any robot** | **Any transport**                                               | **Vendor-neutral**                                                           | **`vendor-neutral/`** |
+| **v3.1.0** | **Any robot** | **Any transport**                                               | **+ Pydantic v2 + 26 tests**                                                 | **`vendor-neutral/`** |
+| **v3.1.1** | **Any robot** | **Any transport**                                               | **+ environment transparency + 29 tests**                                    | **`vendor-neutral/`** |
+| **v3.1.2** | **Any robot** | **Any transport**                                               | **+ threaded PLC I/O + BEST_EFFORT QoS**                                     | **`vendor-neutral/`** |
+| **v3.1.3** | **Any robot** | **Any transport**                                               | **+ batch PLC I/O + poll_hz 120 (18.55 ms)**                                 | **`vendor-neutral/`** |
+| **v3.5.0** | **Any robot** | **Any transport**                                               | **+ trajectory_twin fixes**                                                  | **`vendor-neutral/`** |
+| **v3.6.0** | **Any robot** | **Any transport**                                               | **+ probe chain fixes (100% capture)**                                       | **`vendor-neutral/`** |
+| **v3.7.0** | **Any robot** | **Any transport**                                               | **+ probe_attempted + joint_mapper.py + 51+8 tests + 14.48 ms**              | **`vendor-neutral/`** |
+| **v4.0.0** | **Any robot** | **Any transport**                                               | **+ industrial type-safety (schema v2.2, min/max/strict, type handshake),**   | **`vendor-neutral/`** |
+|            |               |                                                                 | **NaN guards, 86+9 tests, +0.01 ms p99 vs v3.7**                             |                       |
+| **v4.1.0** | **Any robot** | **+ ADS (Beckhoff TwinCAT 3)**                                  | **+ pyads; full setup & troubleshooting guide**                              | **`vendor-neutral/`** |
+| **v4.2.0** | **Any robot** | **+ Snap7 (Siemens S7) + four-transport `cycle_ns` comparison** | **+ schema v2.5 (rack/slot/db_num/byte_offset/bit_offset/s7_type),**         | **`vendor-neutral/`** |
+|            |               |                                                                 | **+ Protocol Comparison in README, 23.11 ms (Snap7), 40.21 ms (ADS)**        |                       |
 
 ## Versioning Policy
 
@@ -765,8 +901,6 @@ This project uses [Semantic Versioning](https://semver.org/):
 - **MINOR** (0.X.0) — new features, backward compatible
 - **PATCH** (0.0.X) — bug fixes, backward compatible
 
----
-
 ## Links
 
 - **Repository:** https://github.com/Nebras4u/isaac-plc-digital-twin
@@ -775,6 +909,6 @@ This project uses [Semantic Versioning](https://semver.org/):
 - **Gen 2 (reference):** [`yaskawa/`](yaskawa/)
 - **Gen 1 (reference):** [`kuka/`](kuka/)
 
-***
+---
 
 *Maintained by [Nebras](https://github.com/Nebras4u) — nebras4u@gmail.com*
