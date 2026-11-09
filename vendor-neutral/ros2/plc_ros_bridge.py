@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 """PLC <-> ROS 2 bridge (vendor neutral).
 
-v4.1 — native TwinCAT 3 ADS support:
-  * New AdsDriver: batch read_list_by_name / write_list_by_name,
-    one ADS round-trip per tick, array-aware via SignalConfig.length.
-    read_list_by_name result is normalised to a dict (list OR dict).
-  * PlcDriver.set_signal_lengths: base-class hook (default no-op).
-  * Bridge __init__ passes per-address length to the driver.
-
-v4.0 — industrial type-safety overhaul (integrated on top of v3.7+):
-  * Wire-level NaN/Inf rejection.
-  * Driver-level type check (_wire_type_check).
-  * _get is a validator, not a coercer.
-  * Per-signal min/max range checks from config.
-  * Per-signal rejection counters (`_stats`).
-  * Boot-time type handshake (TcpJsonDriver only).
-  * act_ang NaN guard.
-  * PlcApiDriver default instance name "296".
+v4.5 — auto-start measurement:
+  * Measurement starts automatically after N warm-up ticks
+    (default 10) and stops on CmdEnable=False or shutdown.
+  * motion_test.py does NOT touch CmdEnable (it stays True so the
+    robot holds position); only CmdAng is written.
+  * cycle_ns = write_done_ns - t_rs = true PLC->ROS->Isaac->ROS->PLC loop.
 """
 import abc
 import csv
@@ -40,13 +30,20 @@ from bridge_logger import setup_logging
 from safety import ESTOP_TOPIC, resolve_estop
 
 
+try:
+    import snap7
+    from snap7 import util as s7util
+    _HAS_SNAP7 = True
+except Exception:
+    _HAS_SNAP7 = False
+
+
 # =============================================================================
-# Latency probe (unchanged)
+# Closed-loop latency probe
 # =============================================================================
 class _LatencyProbe:
-    COLS = ["origin_ns", "read_start_ns", "read_done_ns", "cmd_pub_ns",
-            "sp_pub_ns", "js_pub_ns", "js_recv_ns", "write_done_ns", "hb_counter_val"]
-    _N_PARTS = 7
+    COLS = ["hb", "t_rs_ns", "t_rd_ns", "js_recv_ns",
+            "write_done_ns", "cycle_ns"]
     _FLUSH_EVERY_S = 1.0
 
     def __init__(self, path):
@@ -54,7 +51,7 @@ class _LatencyProbe:
         self._w = csv.writer(self._f)
         self._w.writerow(self.COLS)
         self._f.flush()
-        self._last = None
+        self._last_hb = None
         self._last_flush = time.monotonic()
         self.rows = 0
         self.attempted = 0
@@ -63,22 +60,24 @@ class _LatencyProbe:
 
     def record(self, tag, js_recv_ns, write_done_ns, hb_counter_val=0):
         self.attempted += 1
-        parts = tag.split(";")[: self._N_PARTS]
-        if len(parts) != self._N_PARTS or parts[0] != "p":
+        parts = tag.split(";")
+        if len(parts) < 4 or parts[0] != "p":
             self.rejected += 1
             return False
         try:
-            nums = [int(x) for x in parts[1:]]
+            hb = int(parts[1])
+            t_rs = int(parts[2])
+            t_rd = int(parts[3])
         except ValueError:
             self.rejected += 1
             return False
-        if nums[0] == self._last:
+        if hb == self._last_hb:
             return False
-        self._last = nums[0]
-        chain = nums + [js_recv_ns, write_done_ns, int(hb_counter_val)]
-        if any(b < a for a, b in zip(chain[:8], chain[1:8])):
+        self._last_hb = hb
+        cycle_ns = write_done_ns - t_rs
+        if not (t_rs <= t_rd <= js_recv_ns <= write_done_ns):
             self.order_violations += 1
-        self._w.writerow(chain)
+        self._w.writerow([hb, t_rs, t_rd, js_recv_ns, write_done_ns, cycle_ns])
         self.rows += 1
         now = time.monotonic()
         if now - self._last_flush >= self._FLUSH_EVERY_S:
@@ -105,7 +104,6 @@ MSG_TYPES = {"bool": Bool, "int": Int32, "float": Float64, "string": String}
 CAST = {"bool": bool, "int": int, "float": float, "string": str}
 
 JS_STALE_AGE_S = 0.5
-PROBE_MAX_AGE_NS = 250_000_000
 ACT_ANG_DEADBAND_DEG = 0.001
 ACT_ANG_REFRESH_S = 0.5
 _INT_TOL = 1e-9
@@ -115,9 +113,6 @@ SUB_STREAM_QOS = QoSProfile(
     depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
 
 
-# =============================================================================
-# v4.0: module-level type-safety helpers
-# =============================================================================
 _SERVER_TYPE_MAP = {
     "Bool": "bool", "Boolean": "bool",
     "LReal": "float", "Double": "float", "Real": "float",
@@ -126,7 +121,6 @@ _SERVER_TYPE_MAP = {
 
 
 def _wire_type_check(expected, v):
-    """Return value unchanged if v matches expected; else an ERR string."""
     if v is None:
         return None
     if isinstance(v, str) and v.startswith("ERR:"):
@@ -205,9 +199,6 @@ def _to_bool_from_num(v):
     raise ValueError(f"non_bool_numeric:{f!r}")
 
 
-# =============================================================================
-# Drivers
-# =============================================================================
 class PlcDriver(abc.ABC):
     @abc.abstractmethod
     def connect(self): ...
@@ -215,14 +206,11 @@ class PlcDriver(abc.ABC):
     def read(self, addrs): ...
     @abc.abstractmethod
     def write(self, values): ...
-    def set_signal_types(self, types):
-        pass
-    def set_signal_lengths(self, lengths):
-        pass
-    def get_server_types(self):
-        return None
-    def close(self):
-        pass
+    def set_signal_types(self, types): pass
+    def set_signal_lengths(self, lengths): pass
+    def set_signal_addressing(self, meta): pass
+    def get_server_types(self): return None
+    def close(self): pass
 
 
 class TcpJsonDriver(PlcDriver):
@@ -243,8 +231,7 @@ class TcpJsonDriver(PlcDriver):
     def connect(self):
         self.close()
         self.sock = socket.create_connection(
-            (self.host, self.port), timeout=self.timeout
-        )
+            (self.host, self.port), timeout=self.timeout)
         self.sock.settimeout(self.timeout)
         try:
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -267,7 +254,6 @@ class TcpJsonDriver(PlcDriver):
         line, self.buf = self.buf.split(b"\n", 1)
         resp = json.loads(line.decode("utf-8"),
                           parse_constant=self._reject_constant)
-
         seq = resp.get("seq")
         if seq is not None:
             try:
@@ -284,11 +270,9 @@ class TcpJsonDriver(PlcDriver):
         req = {"cmd": "sync", "read": list(read_addrs)}
         if write_values:
             req["write"] = write_values
-
         t0 = time.perf_counter()
         resp = self._request(req)
         t1 = time.perf_counter()
-
         out = {}
         for a in read_addrs:
             v = resp.get("values", {}).get(a)
@@ -296,13 +280,11 @@ class TcpJsonDriver(PlcDriver):
                 out[a] = v
             else:
                 out[a] = _wire_type_check(self.types.get(a), v)
-
         failed = []
         if write_values:
             for a in write_values:
                 if not resp.get("written", {}).get(a, False):
                     failed.append(a)
-
         self._last_sock_ms = (t1 - t0) * 1000.0
         self._last_parse_ms = 0.0
         return out, failed
@@ -355,13 +337,6 @@ class TcpJsonDriver(PlcDriver):
 
 
 class AdsDriver(PlcDriver):
-    """Native TwinCAT 3 ADS driver via pyads.
-
-    Batched: one read_list_by_name + one write_list_by_name per tick.
-    Arrays (length > 1) use ctypes array types so a 4-element LREAL array
-    is read/written in one ADS call, matching the 'float' YAML type.
-    """
-
     def __init__(self, cfg):
         self.ams_net_id = cfg.ams_net_id
         self.ams_port   = cfg.ams_port
@@ -373,24 +348,15 @@ class AdsDriver(PlcDriver):
         self._last_sock_ms  = 0.0
         self._last_parse_ms = 0.0
 
-    def set_signal_types(self, types):
-        self.types = dict(types)
-
-    def set_signal_lengths(self, lengths):
-        self.lengths = dict(lengths)
+    def set_signal_types(self, types): self.types = dict(types)
+    def set_signal_lengths(self, lengths): self.lengths = dict(lengths)
 
     def connect(self):
         import pyads
         self.close()
-    
         pyads.open_port()
-        pyads.set_local_address(self.local_ams)   # ← 192.168.50.2.1.1
-    
-        self.plc = pyads.Connection(
-            self.ams_net_id,   # ← 111.111.111.3.1.1
-            self.ams_port,     # ← 851
-            self.host          # ← 192.168.50.1
-        )
+        pyads.set_local_address(self.local_ams)
+        self.plc = pyads.Connection(self.ams_net_id, self.ams_port, self.host)
         self.plc.open()
 
     def close(self):
@@ -407,8 +373,8 @@ class AdsDriver(PlcDriver):
         import pyads
         return {
             "bool":   pyads.PLCTYPE_BOOL,
-            "int":    pyads.PLCTYPE_INT,       # 16-bit; PLCTYPE_DINT for DINT
-            "float":  pyads.PLCTYPE_LREAL,     # 64-bit; PLCTYPE_REAL for REAL
+            "int":    pyads.PLCTYPE_INT,
+            "float":  pyads.PLCTYPE_LREAL,
             "string": pyads.PLCTYPE_STRING,
         }[t]
 
@@ -420,7 +386,6 @@ class AdsDriver(PlcDriver):
 
     @staticmethod
     def _unpack(v):
-        """ctypes array → list, so _wire_type_check sees a plain sequence."""
         if v is None or isinstance(v, (str, bytes)):
             return v
         if hasattr(v, "__iter__"):
@@ -430,7 +395,6 @@ class AdsDriver(PlcDriver):
                 return v
         return v
 
-    # ---------------- batch read ----------------
     def read(self, addrs):
         if not addrs:
             return {}
@@ -438,8 +402,6 @@ class AdsDriver(PlcDriver):
         req = {a: self._type_for(a) for a in addrs}
         try:
             values = self.plc.read_list_by_name(req)
-            # pyads returns a list in key order; some versions return a dict.
-            # Normalise to dict either way.
             if isinstance(values, dict):
                 result = values
             else:
@@ -459,7 +421,6 @@ class AdsDriver(PlcDriver):
             for a in addrs
         }
 
-    # ---------------- batch write ----------------
     def write(self, values):
         if not values:
             return []
@@ -476,12 +437,7 @@ class AdsDriver(PlcDriver):
                     failed.append(a)
             return failed
 
-    # ---------------- handshake ----------------
     def get_server_types(self):
-        # pyads does not expose a portable symbol-type query.
-        # Return None → handshake is skipped; ADS itself rejects a
-        # size mismatch with ADSError 1797, and _wire_type_check plus
-        # _validate in the bridge enforce the declared YAML type.
         return None
 
 
@@ -500,8 +456,7 @@ class OpcUaDriver(PlcDriver):
         self._last_sock_ms = 0.0
         self._last_parse_ms = 0.0
 
-    def set_signal_types(self, types):
-        self.types = dict(types)
+    def set_signal_types(self, types): self.types = dict(types)
 
     def connect(self):
         from asyncua.sync import Client
@@ -587,7 +542,6 @@ class OpcUaDriver(PlcDriver):
                 self._last_parse_ms = 0.0
                 return {a: _wire_type_check(self.types.get(a), v)
                         for a, v in out.items()}
-
             out = {}
             for a, v in zip(addrs, values):
                 try:
@@ -625,12 +579,10 @@ class OpcUaDriver(PlcDriver):
                     ok_addrs.append(a)
                 except Exception:
                     failed.append(a)
-
             if variants:
                 try:
                     statuses = self.client.write_values(
-                        [self._node(a) for a in ok_addrs], variants
-                    )
+                        [self._node(a) for a in ok_addrs], variants)
                     for a, st in zip(ok_addrs, statuses):
                         if hasattr(st, "is_good") and not st.is_good():
                             failed.append(a)
@@ -639,8 +591,7 @@ class OpcUaDriver(PlcDriver):
                         try:
                             node = self._node(a)
                             node.write_value(
-                                ua.DataValue(self._make_variant(a, values[a]))
-                            )
+                                ua.DataValue(self._make_variant(a, values[a])))
                         except Exception:
                             failed.append(a)
             return failed
@@ -654,16 +605,14 @@ class PlcApiDriver(PlcDriver):
         self._last_sock_ms = 0.0
         self._last_parse_ms = 0.0
 
-    def set_signal_types(self, types):
-        self.types = dict(types)
+    def set_signal_types(self, types): self.types = dict(types)
 
     def connect(self):
         import clr
         import os
         api_dir = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"
         dll = os.path.join(
-            api_dir, "Siemens.Simatic.Simulation.Runtime.Api.x64.dll"
-        )
+            api_dir, "Siemens.Simatic.Simulation.Runtime.Api.x64.dll")
         os.add_dll_directory(api_dir)
         clr.AddReference(dll)
         from Siemens.Simatic.Simulation.Runtime import SimulationRuntimeManager
@@ -744,11 +693,160 @@ class PlcApiDriver(PlcDriver):
             pass
 
 
+class Snap7Driver(PlcDriver):
+    _SIZE = {"bool": 1, "int16": 2, "int32": 4, "lreal": 8}
+
+    def __init__(self, cfg):
+        if not _HAS_SNAP7:
+            raise RuntimeError(
+                "python-snap7 is not installed. "
+                "Install with: pip install python-snap7")
+        self.host = cfg.host
+        self.rack = getattr(cfg, "rack", 0)
+        self.slot = getattr(cfg, "slot", 1)
+        self.timeout = cfg.timeout
+        self.client = None
+        self._addr_meta = {}
+        self._last_sock_ms = 0.0
+        self._last_parse_ms = 0.0
+
+    def set_signal_addressing(self, meta):
+        self._addr_meta = dict(meta)
+
+    def connect(self):
+        self.close()
+        self.client = snap7.client.Client()
+        self.client.connect(self.host, self.rack, self.slot)
+        if not self.client.get_connected():
+            raise ConnectionError(f"Snap7 cannot connect to {self.host}")
+
+    def close(self):
+        if self.client is not None:
+            try:
+                if self.client.get_connected():
+                    self.client.disconnect()
+            except Exception:
+                pass
+        self.client = None
+
+    def _resolve_s7_type(self, meta):
+        st = meta.get("s7_type")
+        if st in self._SIZE:
+            return st
+        t = meta.get("type", "float")
+        if t == "bool": return "bool"
+        if t == "int": return "int16"
+        if t == "float": return "lreal"
+        return "lreal"
+
+    def read(self, addrs):
+        if not addrs:
+            return {}
+        t0 = time.perf_counter()
+        out = {}
+        try:
+            groups = {}
+            for a in addrs:
+                meta = self._addr_meta.get(a)
+                if meta is None:
+                    out[a] = None
+                    continue
+                db = meta["db"]
+                st = self._resolve_s7_type(meta)
+                size = self._SIZE[st]
+                byte_off = meta["byte"]
+                g = groups.setdefault(db, {"lo": byte_off,
+                                           "hi": byte_off + size,
+                                           "items": []})
+                if byte_off < g["lo"]:
+                    g["lo"] = byte_off
+                if byte_off + size > g["hi"]:
+                    g["hi"] = byte_off + size
+                g["items"].append((a, meta, st, size, byte_off))
+            for db, g in groups.items():
+                span = g["hi"] - g["lo"]
+                data = self.client.db_read(db, g["lo"], span)
+                for (a, meta, st, size, byte_off) in g["items"]:
+                    rel = byte_off - g["lo"]
+                    try:
+                        out[a] = self._decode(data, rel, meta, st)
+                    except Exception as e:
+                        out[a] = f"ERR:{e}"
+        except Exception as e:
+            for a in addrs:
+                out.setdefault(a, f"ERR:{e}")
+        t1 = time.perf_counter()
+        self._last_sock_ms = (t1 - t0) * 1000.0
+        self._last_parse_ms = 0.0
+        return {
+            a: _wire_type_check(
+                (self._addr_meta.get(a) or {}).get("type"), out.get(a))
+            for a in addrs
+        }
+
+    @staticmethod
+    def _decode(data, rel, meta, st):
+        bit = meta.get("bit", 0) or 0
+        if st == "bool":
+            return bool(s7util.get_bool(data, rel, bit))
+        if st == "int16":
+            return int(s7util.get_int(data, rel))
+        if st == "int32":
+            return int(s7util.get_dint(data, rel))
+        if st == "lreal":
+            return float(s7util.get_lreal(data, rel))
+        raise ValueError(f"unknown s7_type {st!r}")
+
+    def write(self, values):
+        if not values:
+            return []
+        failed = []
+        for a, v in values.items():
+            meta = self._addr_meta.get(a)
+            if meta is None:
+                failed.append(a)
+                continue
+            try:
+                self._write_one(meta, v)
+            except Exception as e:
+                print(f"snap7 write {a} failed: {e}")
+                failed.append(a)
+        return failed
+
+    def _write_one(self, meta, value):
+        db = meta["db"]
+        byte_off = meta["byte"]
+        bit = meta.get("bit", 0) or 0
+        st = self._resolve_s7_type(meta)
+        if st == "bool":
+            data = self.client.db_read(db, byte_off, 1)
+            s7util.set_bool(data, 0, bit, bool(value))
+            self.client.db_write(db, byte_off, data)
+            return
+        if st == "int16":
+            data = bytearray(2)
+            s7util.set_int(data, 0, int(value))
+            self.client.db_write(db, byte_off, data)
+            return
+        if st == "int32":
+            data = bytearray(4)
+            s7util.set_dint(data, 0, int(value))
+            self.client.db_write(db, byte_off, data)
+            return
+        if st == "lreal":
+            data = bytearray(8)
+            s7util.set_lreal(data, 0, float(value))
+            self.client.db_write(db, byte_off, data)
+            return
+        raise ValueError(f"unsupported s7_type {st!r}")
+
+
 DRIVERS = {
     "tcp_json": TcpJsonDriver,
     "opcua":    OpcUaDriver,
     "plc_api":  PlcApiDriver,
     "ads":      AdsDriver,
+    "snap7":    Snap7Driver,
 }
 
 
@@ -769,8 +867,7 @@ class PlcRosBridge(Node):
 
         log_cfg = {"logging": self.cfg.logging} if self.cfg.logging else {}
         self.log = setup_logging(
-            log_cfg, logger_name="plc_ros_bridge", ros_logger=self.get_logger()
-        )
+            log_cfg, logger_name="plc_ros_bridge", ros_logger=self.get_logger())
 
         self.log.info(
             "config_loaded",
@@ -804,13 +901,16 @@ class PlcRosBridge(Node):
                 return raw
             if raw.startswith("GVL.") or raw.startswith("MAIN."):
                 return raw
+            if raw.startswith("DB") and "." in raw:
+                return raw
             if driver_name == "opcua":
                 return opcua_tpl.format(ns=ns, raw=raw)
+            if driver_name == "snap7":
+                return raw
             if not db:
                 raise ValueError(
                     f"vars.db is empty; cannot build address for signal "
-                    f"'{raw}'. Set vars.db in the YAML."
-                )
+                    f"'{raw}'. Set vars.db in the YAML.")
             return f'{db}.{raw}'
 
         self.strict_types = bool(getattr(self.cfg, "strict_types", True))
@@ -827,17 +927,35 @@ class PlcRosBridge(Node):
                 "strict": getattr(s, "strict", None),
                 "reject_non_finite": bool(getattr(s, "reject_non_finite", True)),
                 "allow_int_for_float": bool(getattr(s, "allow_int_for_float", True)),
+                "db_num":      getattr(s, "db_num", None),
+                "byte_offset": getattr(s, "byte_offset", None),
+                "bit_offset":  getattr(s, "bit_offset", 0) or 0,
+                "s7_type":     getattr(s, "s7_type", None),
             }
         self.read_names = [n for n, s in self.sig.items() if s["dir"] == "read"]
         self._read_addrs = [self.sig[n]["addr"] for n in self.read_names]
 
-        # Wire-level type + length hints for the driver
         self.driver.set_signal_types(
-            {s["addr"]: s["type"] for s in self.sig.values()}
-        )
+            {s["addr"]: s["type"] for s in self.sig.values()})
         self.driver.set_signal_lengths(
-            {s["addr"]: s["length"] for s in self.sig.values()}
-        )
+            {s["addr"]: s["length"] for s in self.sig.values()})
+
+        if driver_name == "snap7":
+            meta = {}
+            for name, s in self.sig.items():
+                if s["db_num"] is None or s["byte_offset"] is None:
+                    raise ValueError(
+                        f"snap7 signal '{name}' needs db_num and byte_offset "
+                        f"(add them in the YAML under signals.{name})")
+                meta[s["addr"]] = {
+                    "db": s["db_num"],
+                    "byte": s["byte_offset"],
+                    "bit": s["bit_offset"],
+                    "type": s["type"],
+                    "s7_type": s["s7_type"],
+                }
+            self.driver.set_signal_addressing(meta)
+
         self._stats = defaultdict(lambda: defaultdict(int))
 
         robot = self.cfg.robot
@@ -850,10 +968,14 @@ class PlcRosBridge(Node):
         self.hb_counter = hb.counter
         self.hb_ack     = hb.ack
 
+        # Measurement state
+        self._measure_active = False
+        self._measure_start_ns = None
+        self._measure_samples = 0
+        self._measure_warmup_ticks = 10
+
         state_qos = QoSProfile(
-            depth=1,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
-        )
+            depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self.pubs = [
             (p, self.create_publisher(MSG_TYPES[p.type], p.topic, state_qos))
             for p in self.cfg.publish
@@ -868,23 +990,20 @@ class PlcRosBridge(Node):
             self.pub_estop = self.create_publisher(
                 Bool, "/plc/emergency_stop", state_qos)
 
-        self.pub_conn  = self.create_publisher(
+        self.pub_conn = self.create_publisher(
             Bool, "/plc/connected", state_qos)
 
         self._estop_from_plc = any(
             p.topic == "/plc/emergency_stop" and p.type == "bool"
-            for p in self.cfg.publish
-        )
+            for p in self.cfg.publish)
         self.pub_cmd_ang = None
         if self.cmd_ang:
             self.pub_cmd_ang = self.create_publisher(
-                JointState, robot.cmd_ang_topic, PUB_STREAM_QOS
-            )
+                JointState, robot.cmd_ang_topic, PUB_STREAM_QOS)
 
         self._probe = (
             _LatencyProbe(self.cfg.latency_probe_file)
-            if self.cfg.latency_probe else None
-        )
+            if self.cfg.latency_probe else None)
         self._js_tag = ""
         self._js_recv_ns = 0
         self._probe_sent = 0
@@ -907,8 +1026,7 @@ class PlcRosBridge(Node):
         if self.act_ang:
             self.create_subscription(
                 JointState, robot.joint_states_topic,
-                self.on_joint_states, SUB_STREAM_QOS,
-            )
+                self.on_joint_states, SUB_STREAM_QOS)
 
         self.connected = False
         self._last_try = 0.0
@@ -924,8 +1042,7 @@ class PlcRosBridge(Node):
         self._watchdog_fired = False
         self._watchdog_stop = threading.Event()
         self._watchdog_thread = threading.Thread(
-            target=self._watchdog_loop, daemon=True, name="plc_watchdog"
-        )
+            target=self._watchdog_loop, daemon=True, name="plc_watchdog")
         self._watchdog_thread.start()
 
         self._last_pub = {}
@@ -943,27 +1060,23 @@ class PlcRosBridge(Node):
             self._diag_updater = Updater(self)
             self._diag_updater.setHardwareID("plc_ros_bridge")
             self._diag_updater.add(
-                FunctionDiagnosticTask("PLC link", self._diag)
-            )
+                FunctionDiagnosticTask("PLC link", self._diag))
             self.create_timer(1.0, self._diag_updater.update)
 
         poll_hz = self.cfg.poll_hz
         self._poll_period = 1.0 / poll_hz
         self._io_stop = threading.Event()
         self._io_thread = threading.Thread(
-            target=self._io_loop, daemon=True, name="plc_io"
-        )
+            target=self._io_loop, daemon=True, name="plc_io")
         self._io_thread.start()
 
         self.log.info(
             "bridge_started",
             extra={"driver": driver_name, "poll_hz": poll_hz,
-                   "strict_types": self.strict_types},
+                   "strict_types": self.strict_types,
+                   "measure_warmup_ticks": self._measure_warmup_ticks},
         )
 
-    # ------------------------------------------------------------------ #
-    # Callbacks
-    # ------------------------------------------------------------------ #
     def on_joint_states(self, msg):
         with self._js_lock:
             if self._probe is not None:
@@ -993,8 +1106,7 @@ class PlcRosBridge(Node):
             self._js_recv_ns = 0
             self.log.info(
                 "plc_connected",
-                extra={"driver": self.driver_name, "backoff_s": self._backoff},
-            )
+                extra={"driver": self.driver_name, "backoff_s": self._backoff})
             if self._estop_from_plc:
                 self.log.info("plc_reconnected_estop_from_plc")
             else:
@@ -1003,8 +1115,7 @@ class PlcRosBridge(Node):
         else:
             self.log.warning(
                 "plc_disconnected",
-                extra={"driver": self.driver_name},
-            )
+                extra={"driver": self.driver_name})
             self._publish_estop(True)
             self._last_pub["/plc/emergency_stop"] = True
             self.log.warning("plc_lost_estop_published")
@@ -1049,8 +1160,7 @@ class PlcRosBridge(Node):
         except Exception as e:
             self.log.warning(
                 "plc_connect_failed",
-                extra={"error": str(e), "next_retry_in_s": self._backoff},
-            )
+                extra={"error": str(e), "next_retry_in_s": self._backoff})
             self._set_connected(False)
             self._backoff = min(self._backoff * 2.0, self._backoff_max)
             return False
@@ -1066,9 +1176,6 @@ class PlcRosBridge(Node):
         self._set_connected(True)
         return True
 
-    # ------------------------------------------------------------------ #
-    # v4.0: validation
-    # ------------------------------------------------------------------ #
     def _bump(self, name, reason):
         key = reason.split(":", 1)[0] if isinstance(reason, str) else str(reason)
         if not key:
@@ -1092,10 +1199,8 @@ class PlcRosBridge(Node):
             if s["type"] == "string":
                 return v
             raise ValueError(f"expected_{s['type']}:str")
-
         if isinstance(v, (list, tuple)):
             return self._validate_array(s, v)
-
         t = s["type"]
         if t == "float":
             if isinstance(v, bool) or not isinstance(v, (int, float)):
@@ -1196,15 +1301,11 @@ class PlcRosBridge(Node):
                         "value": repr(v),
                         "reason": reason,
                         "counts": dict(self._stats[name]),
-                    },
-                )
+                    })
             return None
         self._stats[name]["good"] += 1
         return result
 
-    # ------------------------------------------------------------------ #
-    # tick()
-    # ------------------------------------------------------------------ #
     def tick(self):
         if not self.connected and not self._try_connect():
             return
@@ -1222,8 +1323,7 @@ class PlcRosBridge(Node):
                 js_fresh = (
                     self._js_ok
                     and self._last_js_t > 0
-                    and (time.monotonic() - self._last_js_t) <= JS_STALE_AGE_S
-                )
+                    and (time.monotonic() - self._last_js_t) <= JS_STALE_AGE_S)
                 if self.act_ang:
                     if js_fresh:
                         ang_deg = [math.degrees(float(x)) for x in self._js_rad]
@@ -1231,13 +1331,12 @@ class PlcRosBridge(Node):
                             self._bump("__act_ang__", "non_finite")
                             self.log.error(
                                 "joint_angles_non_finite",
-                                extra={"ang": ang_deg},
-                            )
+                                extra={"ang": ang_deg})
                             js_fresh = False
                     if js_fresh:
                         probe_tag, probe_recv = self._js_tag, self._js_recv_ns
-                        needs_write = self._act_ang_needs_write(
-                            ang_deg, time.monotonic())
+                        needs_write = (self._act_ang_needs_write(ang_deg, time.monotonic())
+                            or (self._probe is not None and bool(probe_tag)))
                         if needs_write:
                             if len(self.act_ang) == 1:
                                 sig = self.act_ang[0]
@@ -1260,7 +1359,10 @@ class PlcRosBridge(Node):
                         if self.feedback_valid:
                             writes_to_send[self.sig[self.feedback_valid]["addr"]] = False
 
-            if self.driver_name == "tcp_json" and hasattr(self.driver, "sync"):
+            if self.driver_name == "tcp_json":
+                raw = self.driver.read(self._read_addrs)
+                failed = self.driver.write(writes_to_send) if writes_to_send else []
+            elif hasattr(self.driver, "sync"):
                 raw, failed = self.driver.sync(self._read_addrs, writes_to_send)
             else:
                 raw = self.driver.read(self._read_addrs)
@@ -1283,22 +1385,38 @@ class PlcRosBridge(Node):
                         "read_ms": round(read_ms, 1),
                         "sock_ms": round(sock_ms, 2),
                         "gap_ms": round(gap_ms, 1),
-                    },
-                )
+                    })
 
             self._last_tick_ok = time.monotonic()
             if self._watchdog_fired:
                 self._last_pub.clear()
                 self._watchdog_fired = False
 
+            # Auto-start measurement after warm-up ticks
+            if (not self._measure_active
+                    and self._tick_count >= self._measure_warmup_ticks):
+                self._measure_active = True
+                self._measure_start_ns = time.monotonic_ns()
+                self._measure_samples = 0
+                self.log.info(
+                    "measurement_started",
+                    extra={"trigger": "warmup_done",
+                           "tick": self._tick_count,
+                           "t_start_ns": self._measure_start_ns})
+
             if writes_to_send:
                 if not failed:
-                    if act_written and probe_tag:
-                        if (t_rd - probe_recv) <= PROBE_MAX_AGE_NS:
-                            hb_val = (vals.get(self.hb_counter)
-                                      if self.hb_counter else None)
-                            hb_out = int(hb_val) if isinstance(hb_val, int) else -1
-                            self._probe.record(probe_tag, probe_recv, t_rd, hb_out)
+                    if (self._measure_active
+                            and act_written
+                            and probe_tag
+                            and self._probe is not None):
+                        hb_val = (vals.get(self.hb_counter)
+                                  if self.hb_counter else None)
+                        hb_out = int(hb_val) if isinstance(hb_val, int) else 0
+                        ok = self._probe.record(
+                            probe_tag, probe_recv, t_rd, hb_out)
+                        if ok:
+                            self._measure_samples += 1
                     if ack_to_send is not None:
                         self._last_ack = ack_to_send
                 else:
@@ -1306,8 +1424,7 @@ class PlcRosBridge(Node):
                     for a in failed:
                         self.log.warning(
                             "write_failed",
-                            extra={"tick_id": tick_id, "addr": a},
-                        )
+                            extra={"tick_id": tick_id, "addr": a})
 
             self._publish(vals, t_rs, t_rd)
 
@@ -1330,13 +1447,14 @@ class PlcRosBridge(Node):
                         "rate_hz": self._measured_rate_hz(),
                         **self._probe_stats(),
                         **self._deadline_stats(),
+                        "measure_active": self._measure_active,
+                        "measure_samples": self._measure_samples,
                         "slow": self._slow_count,
                         "slow_pct": round(
                             100.0 * self._slow_count / self._tick_count, 2),
                         "avg_slow_sock_ms": round(avg_sock, 2),
                         "avg_slow_gap_ms": round(avg_gap, 1),
-                    },
-                )
+                    })
                 self._slow_count = 0
                 self._slow_sock_sum_ms = 0.0
                 self._slow_gap_sum_ms = 0.0
@@ -1347,8 +1465,7 @@ class PlcRosBridge(Node):
             self.log.error(
                 "plc_link_error",
                 extra={"tick_id": tick_id, "error": str(e),
-                       "driver": self.driver_name},
-            )
+                       "driver": self.driver_name})
             self.driver.close()
             self._set_connected(False)
             self._last_try = 0.0
@@ -1359,8 +1476,7 @@ class PlcRosBridge(Node):
             self._warned["estop_unreadable"] = now
             self.log.error(
                 "estop_unreadable_failsafe_active",
-                extra={"signal": signal},
-            )
+                extra={"signal": signal})
 
     def _publish(self, vals, t_rs=None, t_rd=None):
         for p, pub in self.pubs:
@@ -1383,15 +1499,17 @@ class PlcRosBridge(Node):
                 pub.publish(msg)
 
         if self.pub_cmd_ang:
-            ang = []
+            ang_deg = []
             for n in self.cmd_ang:
                 v = vals.get(n)
                 if v is None:
                     return
                 if isinstance(v, (list, tuple)):
-                    ang.extend(v)
+                    ang_deg.extend(v)
                 else:
-                    ang.append(v)
+                    ang_deg.append(v)
+            # PLC stores degrees; physics_twin/JointMapper expects radians
+            ang = [math.radians(d) for d in ang_deg]
             self._last_cmd_ang = list(ang)
 
             js = JointState()
@@ -1399,10 +1517,9 @@ class PlcRosBridge(Node):
             js.name = list(self.joints)
             js.position = ang
             if self._probe is not None and t_rs is not None:
-                origin_ns = (self._last_tick_end_ns
-                             if self._last_tick_end_ns is not None else t_rs)
-                js.header.frame_id = (
-                    f"p;{origin_ns};{t_rs};{t_rd};{time.monotonic_ns()}")
+                hb = vals.get(self.hb_counter) if self.hb_counter else None
+                hb_tag = int(hb) if isinstance(hb, int) else 0
+                js.header.frame_id = f"p;{hb_tag};{t_rs};{t_rd}"
                 self._probe_sent += 1
             self.pub_cmd_ang.publish(js)
 
@@ -1521,6 +1638,8 @@ class PlcRosBridge(Node):
         stat.add("config_hash", self._cfg_hash[:12] + "…")
         stat.add("schema_version", self.cfg.schema_version)
         stat.add("strict_types", str(self.strict_types))
+        stat.add("measure_active", str(self._measure_active))
+        stat.add("measure_samples", str(self._measure_samples))
         total_rej = sum(c.get("rejected_total", 0) for c in self._stats.values())
         stat.add("signal_rejections_total", str(total_rej))
         return stat
