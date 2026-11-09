@@ -1,12 +1,15 @@
 """Declarative configuration schema for plc_ros_bridge.
 
-v2.3 — native ADS support:
-  * DriverName: added "ads"
-  * PlcConfig: ams_net_id, ams_port (TwinCAT 3)
-  * SignalConfig: length (array size, default 1)
-All new fields are optional with safe defaults, so v2.0/v2.1/v2.2 configs
-remain loadable without changes.
+v2.5 — Snap7 support:
+  * New DriverName 'snap7'.
+  * PlcConfig: rack/slot for S7.
+  * SignalConfig: db_num/byte_offset/bit_offset for absolute S7 addressing.
+  * SignalConfig.s7_type: explicit S7 primitive type
+    ('bool' | 'int16' | 'int32' | 'lreal'), overriding the generic YAML
+    type when decoding. Required for distinguishing Int vs DInt, and
+    for picking the right snap7.util decoder.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -28,7 +31,8 @@ CURRENT_SCHEMA_VERSION = "2.3"
 
 SignalType = Literal["bool", "int", "float", "string"]
 SignalDir = Literal["read", "write"]
-DriverName = Literal["tcp_json", "opcua", "plc_api", "ads"]
+DriverName = Literal["tcp_json", "opcua", "ads", "snap7"]
+S7Type = Literal["bool", "int16", "int32", "lreal"]
 
 
 class ConfigError(ValueError):
@@ -42,16 +46,21 @@ class SignalConfig(BaseModel):
     type: SignalType = "float"
     dir: SignalDir = "read"
 
-    # --- v2.3: array length (1 = scalar). Defaults to 1 so v2.2 configs
-    # load unchanged. Used by AdsDriver/OpcUaDriver to read/write blocks.
     length: int = Field(default=1, ge=1, le=65535)
 
-    # --- v2.2: type/range/coercion policy (all optional) ---
     min: Optional[float] = None
     max: Optional[float] = None
     strict: Optional[bool] = None
     reject_non_finite: bool = True
     allow_int_for_float: bool = True
+
+    # --- v2.5: Snap7 absolute addressing ---
+    db_num: Optional[int] = Field(default=None, ge=1, le=65535)
+    byte_offset: Optional[int] = Field(default=None, ge=0, le=65535)
+    bit_offset: Optional[int] = Field(default=0, ge=0, le=7)
+
+    # --- v2.5: Snap7 primitive type (overrides YAML 'type' at decode) ---
+    s7_type: Optional[S7Type] = None
 
     @field_validator("addr")
     @classmethod
@@ -75,6 +84,26 @@ class SignalConfig(BaseModel):
             raise ValueError(
                 f"min/max only valid for int/float signals, not {self.type!r}"
             )
+        if self.type == "bool" and self.byte_offset is not None:
+            if self.bit_offset is None or not (0 <= self.bit_offset <= 7):
+                raise ValueError("bool signal requires bit_offset in 0..7")
+
+        # --- v2.5: s7_type consistency checks ---
+        if self.s7_type is not None:
+            if self.s7_type == "bool" and self.type != "bool":
+                raise ValueError(
+                    f"s7_type='bool' requires type='bool', got type='{self.type}'"
+                )
+            if self.s7_type in ("int16", "int32") and self.type != "int":
+                raise ValueError(
+                    f"s7_type='{self.s7_type}' requires type='int', "
+                    f"got type='{self.type}'"
+                )
+            if self.s7_type == "lreal" and self.type != "float":
+                raise ValueError(
+                    f"s7_type='lreal' requires type='float', "
+                    f"got type='{self.type}'"
+                )
         return self
 
 
@@ -91,22 +120,24 @@ class PlcConfig(BaseModel):
     user: Optional[str] = None
     password: Optional[str] = None
 
-    instance: Optional[str] = None
-
-    # --- v2.3: TwinCAT 3 native ADS ---
+    # TwinCAT 3 ADS
     ams_net_id: Optional[str] = None
-    ams_port: int = Field(default=851, ge=1, le=65535)   # PORT_TC3PLC1
+    ams_port: int = Field(default=851, ge=1, le=65535)
     local_ams_net_id: Optional[str] = None
+
+    # --- v2.5: Siemens S7 (Snap7) ---
+    rack: int = Field(default=0, ge=0, le=7)
+    slot: int = Field(default=1, ge=0, le=31)
 
     @model_validator(mode="after")
     def _driver_specific_required(self) -> "PlcConfig":
-        if self.driver == "tcp_json":
+        if self.driver in ("tcp_json", "snap7"):
             if not self.host:
-                raise ValueError("tcp_json driver requires 'plc.host'")
-        elif self.driver == "opcua":
+                raise ValueError(f"{self.driver} driver requires 'plc.host'")
+        if self.driver == "opcua":
             if not self.endpoint:
                 raise ValueError("opcua driver requires 'plc.endpoint'")
-        elif self.driver == "ads":
+        if self.driver == "ads":
             if not self.ams_net_id:
                 raise ValueError("ads driver requires 'plc.ams_net_id'")
             if not self.host:
@@ -172,12 +203,9 @@ class BridgeConfig(BaseModel):
 
     logging: Optional[Dict[str, Any]] = None
 
-    # --- v2.2: type-safety policy ---
     strict_types: bool = True
     strict_type_handshake: bool = False
 
-    # Simulation / test escape hatch: disable the mandatory E-stop
-    # forwarding rule. Production YAMLs must leave this True (default).
     estop_forwarding_required: bool = True
 
     @field_validator("signals")
@@ -191,7 +219,6 @@ class BridgeConfig(BaseModel):
 
     @model_validator(mode="after")
     def _require_estop_forwarding(self) -> "BridgeConfig":
-        """Fail-fast if the PLC E-stop is not forwarded to ROS."""
         if not self.estop_forwarding_required:
             return self
         if not any(
@@ -204,6 +231,18 @@ class BridgeConfig(BaseModel):
                 "  publish:\n"
                 "    - {signal: estop, topic: /plc/emergency_stop, type: bool}\n"
                 "(or set 'estop_forwarding_required: false' for tests)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _forbid_ruckig_bypass(self) -> "BridgeConfig":
+        # CmdAng must reach the twin via trajectory_twin (Ruckig), which
+        # listens on /plc/cmd_ang and is the only publisher of
+        # /servo_setpoints.
+        if self.robot.cmd_ang and self.robot.cmd_ang_topic == "/servo_setpoints":
+            raise ValueError(
+                "robot.cmd_ang_topic must not be '/servo_setpoints' "
+                "(bypasses Ruckig). Use '/plc/cmd_ang'."
             )
         return self
 
@@ -263,7 +302,6 @@ class BridgeConfig(BaseModel):
                     f"publish[{i}].signal -> signal '{p.signal}' must be dir='read'"
                 )
 
-        # v2.2: cross-check publish[].type against signals[].type.
         for i, p in enumerate(self.publish):
             declared = self.signals[p.signal].type
             if p.type != declared:
@@ -312,6 +350,18 @@ def load_bridge_config(path: str | Path) -> Tuple[BridgeConfig, str]:
         raise ConfigError(f"top-level of {path} must be a mapping")
 
     migrated = _migrate(cfg_dict)
+
+    selected_driver = migrated.get("driver")
+    if selected_driver and selected_driver in migrated:
+        driver_block = migrated.pop(selected_driver)
+        merged = {**migrated.get("defaults", {}), **driver_block}
+        migrated.update(merged)
+        migrated.pop("defaults", None)
+        migrated.pop("tcp_json", None)
+        migrated.pop("ads", None)
+        migrated.pop("opcua", None)
+        migrated.pop("snap7", None)
+        migrated.pop("driver", None)
 
     canonical = json.dumps(migrated, sort_keys=True, separators=(",", ":"))
     cfg_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
