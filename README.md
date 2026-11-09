@@ -14,14 +14,12 @@ An industrial-grade **Digital Twin platform** for robot arms driven by
 
 The repository hosts multiple generations of the platform, side by side:
 
-| Generation                 | Robot               | Transport                             | Location                                         | Status       |
-| :------------------------- | :------------------ | :------------------------------------ | :----------------------------------------------- | :----------- |
-| **Gen 4 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api / **ads**  | [`vendor-neutral/`](vendor-neutral/)             | **Active**   |
-| Gen 3 — Vendor-Neutral     | Any (config-driven) | tcp_json / opcua / plc_api            | [`vendor-neutral/`](vendor-neutral/)             | Predecessor  |
-| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                                | [`yaskawa/`](yaskawa/)                           | Reference    |
-| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                              | [`kuka/`](kuka/)                                 | Reference    |
-
----
+| Generation                 | Robot               | Transport                                        | Location                             | Status       |
+| :------------------------- | :------------------ | :----------------------------------------------- | :----------------------------------- | :----------- |
+| **Gen 4 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api / **ads** / **snap7** | [`vendor-neutral/`](vendor-neutral/) | **Active**   |
+| Gen 3 — Vendor-Neutral     | Any (config-driven) | tcp_json / opcua / plc_api                       | [`vendor-neutral/`](vendor-neutral/) | Predecessor  |
+| Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                                           | [`yaskawa/`](yaskawa/)               | Reference    |
+| Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                                         | [`kuka/`](kuka/)                     | Reference    |
 
 ## Safety Notice
 
@@ -33,14 +31,12 @@ The repository hosts multiple generations of the platform, side by side:
   trajectory twin, PLC counters) is **functional monitoring** that stops
   the *simulated* robot. It is not designed, validated, or certified
   according to IEC 61508, ISO 13849-1, or IEC 62061.
-- Communication over `tcp_json`, OPC UA, ADS, or ROS 2 has no safety-rated
-  integrity (no black channel, no safety protocol).
+- Communication over `tcp_json`, OPC UA, ADS, Snap7, or ROS 2 has no
+  safety-rated integrity (no black channel, no safety protocol).
 - Any real installation needs an independent, certified safety layer
   (for example an F-CPU with PROFIsafe and hardware E-Stop circuits).
   This is on the roadmap and deliberately postponed for the current
   simulation-only stage.
-
----
 
 ## Environment
 
@@ -50,25 +46,29 @@ The repository hosts multiple generations of the platform, side by side:
 The reference numbers (5.2 ms mean, 16.3 ms max) were measured on the
 **author's reference machine**:
 
-| Factor         | Reference machine                   |
-| :------------- | :---------------------------------- |
-| OS             | Native Ubuntu 24.04                 |
-| CPU            | Dedicated cores (no throttling)     |
-| GPU            | NVIDIA, no passthrough              |
-| PLC server     | Native Windows, low-latency         |
-| Isaac Sim      | Native, 60 FPS stable               |
-| ROS 2          | Jazzy                               |
-| RMW            | FastDDS                             |
-| `tcp_json`     | msgpack + `TCP_NODELAY` + batch     |
+| Factor     | Reference machine               |
+| :--------- | :------------------------------ |
+| OS         | Native Ubuntu 24.04             |
+| CPU        | Dedicated cores (no throttling) |
+| GPU        | NVIDIA, no passthrough          |
+| PLC server | Native Windows, low-latency     |
+| Isaac Sim  | Native, 60 FPS stable           |
+| ROS 2      | Jazzy                           |
+| RMW        | FastDDS                         |
+| `tcp_json` | msgpack + `TCP_NODELAY` + batch |
 
-> **Note on v3.7 and v4.0:** The reference numbers above were measured on
-> the reference machine with batch enabled at **60 Hz** (v3.1.2 and
-> earlier). v3.5–v3.7 added probe observability, trajectory fixes, and
-> `poll_hz: 200`; v4.0 added the industrial type-safety layer. Those
-> changes were measured on the **Docker/VM**, **not** on the reference
-> machine. The reference machine has **not been re-measured** for v3.7
-> or v4.0. See [`vendor-neutral/README.md`](vendor-neutral/README.md)
-> for the VM comparison.
+> **Note on v3.7, v4.0, and the protocol comparison:** The reference
+> numbers above were measured on the reference machine with batch
+> enabled at **60 Hz** (v3.1.2 and earlier). v3.5–v3.7 added probe
+> observability, trajectory fixes, and `poll_hz: 200`; v4.0 added the
+> industrial type-safety layer. The v3.7 and v4.0 measurements — and
+> the four-transport protocol comparison — were performed on the
+> **Docker/VM** environment described in
+> [Protocol Comparison](#protocol-comparison-measured--v40-dockervm),
+> **not** on the reference machine. The reference machine has **not
+> been re-measured** for v3.7 or v4.0. See
+> [`vendor-neutral/README.md`](vendor-neutral/README.md) for the VM
+> comparison.
 
 The **same code** on a **Docker / VM environment** (RTX 5060, shared
 vCPUs, PLCSIM Advanced over TCP/JSON) gives different numbers — see
@@ -80,8 +80,6 @@ and does not indicate a regression.
 > `--network host`. All 4 ADS connection tests pass in 0.04 s. See
 > [`vendor-neutral/docs/beckhoff_ads_setup.md`](vendor-neutral/docs/beckhoff_ads_setup.md).
 
----
-
 ## Active Development: `vendor-neutral/` (Gen 4 — v4.0.0)
 
 The current generation removes hard-coded coupling to any specific robot
@@ -90,7 +88,9 @@ Python.**
 
 Highlights:
 
-- 4 transports in one abstraction: `tcp_json`, `opcua`, `plc_api`, and **`ads`** (for Beckhoff TwinCAT 3)
+- 5 transports in one abstraction: `tcp_json`, `opcua`, `plc_api`,
+  **`ads`** (for Beckhoff TwinCAT 3), and **`snap7`** (for Siemens
+  S7-1500 over S7comm)
 - **Batch PLC I/O** (`ReadSignals`/`WriteSignals` — one API call per
   request instead of per-tag; v3.1.3)
 - Robot description in `config/robot.yaml`
@@ -104,8 +104,12 @@ Highlights:
   out-of-limits command (never an abrupt setpoint jump)
 - Counter-based heartbeat protocol
 - Sub-0.03° tracking accuracy verified under full gravity load
-- **Full-loop latency: 5.2 ms mean, 16.3 ms max** (TCP-JSON optimized,
-  reference machine — see [Environment](#environment))
+- **Full-loop latency (reference machine, v3.1.2, TCP-JSON optimized):**
+  5.2 ms mean, 16.3 ms max — see [Environment](#environment)
+- **Full-loop latency (Docker/VM, v4.0, four-transport comparison):**
+  Snap7 and TCP-JSON **23.1 / 23.3 ms mean**, OPC UA **36.5 ms mean**,
+  ADS **40.2 ms mean** — see
+  [Protocol Comparison](#protocol-comparison-measured--v40-dockervm)
 - **58% faster** than the naive TCP-JSON baseline on the same machine
   (mean 12.5 ms → 5.2 ms)
 - **86 pytest tests** covering the config schema, migration, E-stop
@@ -114,9 +118,10 @@ Highlights:
   physics estop latch, and non-finite rejection in all four nodes
 - **9 standalone probe tests** covering the latency-tag chain
   (`test_probe_chain.py`)
-- **Config schema v2.2** (Pydantic v2, fail-fast, audit trail,
+- **Config schema v2.3** (Pydantic v2, fail-fast, audit trail,
   per-signal `min`/`max`/`strict`/`reject_non_finite`,
-  `strict_type_handshake`, `publish[].type` cross-check)
+  `strict_type_handshake`, `publish[].type` cross-check, `s7_type`
+  consistency, `db_num`/`byte_offset`/`bit_offset` for Snap7)
 - **Industrial type-safety (v4.0):** `_get` is a validator, not a
   coercer (`str→int` and `float→int` truncation rejected, `int→bool`
   rejected, `NaN`/`Inf` rejected, out-of-range rejected — all with
@@ -126,47 +131,193 @@ Highlights:
 
 **See [`vendor-neutral/README.md`](vendor-neutral/README.md) for full docs.**
 
----
+## Protocol Comparison (Measured — v4.0, Docker/VM)
+
+> **Different metric from [Latency Performance](#latency-performance).**
+> The numbers below are the **full-loop cycle**
+> (`cycle_ns = write_done_ns - t_rs`), i.e.
+> PLC → ROS → Isaac → ROS → PLC, measured on the Docker/VM environment
+> described in [Environment](#environment). The historical reference-machine
+> numbers (5.2 ms mean) are a different stage/metric and have **not**
+> been re-measured with this `cycle_ns` definition.
+> **Do not compare rows across the two sections.**
+
+### Environment (this run)
+
+| Item       | Value                             |
+| :--------- | :-------------------------------- |
+| OS         | Ubuntu 24.04 (Docker)             |
+| CPU        | Shared vCPU (24 cores, `taskset`) |
+| GPU        | RTX 5060, 8 GB                    |
+| PLC server | PLCSIM Advanced V6.0              |
+| ROS 2      | Jazzy                             |
+| RMW        | FastDDS                           |
+
+### Full-loop cycle — `cycle_ns` (ms)
+
+| Transport         | Rows  | Mean      | p50   | p95   | p99   | Max     |
+| :---------------- | ----: | --------: | ----: | ----: | ----: | ------: |
+| **Snap7** (S7)    | ~1.5k | **23.11** | 19.58 | 37.74 | 39.35 | 53.64   |
+| **TCP-JSON**      | ~2.1k | **23.28** | 19.20 | 37.70 | 40.55 | 200.64  |
+| **OPC UA**        | ~3.0k | **36.54** | 38.04 | 41.87 | 42.87 | 178.78  |
+| **ADS** (TwinCAT) | ~1.3k | **40.21** | 40.97 | 49.33 | 52.87 | 64.96   |
+
+### LBP (Latency Bound Probability) — `cycle_ns` ≤ threshold
+
+| Threshold | Snap7  | TCP-JSON | OPC UA | ADS    |
+| :-------- | -----: | -------: | -----: | -----: |
+| ≤ 20 ms   | ~55%   | ~57%     | ~4%    | ~15%   |
+| ≤ 30 ms   | ~85%   | ~83%     | ~12%   | ~6%    |
+| ≤ 40 ms   | ~97%   | ~95%     | ~60%   | ~42%   |
+| ≤ 50 ms   | ~99.5% | ~99%     | ~93%   | ~93%   |
+| ≤ 60 ms   | 100%   | ~99.9%   | ~97%   | ~99.5% |
+| ≤ 100 ms  | 100%   | ~99.95%  | ~99.7% | 100%   |
+
+### Interpretation
+
+- **Snap7 and TCP-JSON** deliver the best full-loop cycle
+  (mean ≈ 23 ms, p50 ≈ 19 ms) on this environment. Both distributions
+  are **bimodal**: a fast cluster at ~19–22 ms and a slower cluster at
+  ~35–40 ms, depending on whether `act_ang` was written in the same
+  tick — which is why Mean sits well above p50.
+- **OPC UA** has a higher p50 (38 ms) and a p99 of 42.87 ms, but also
+  **catastrophic outliers** up to 178.78 ms (likely reconnect or GC).
+  This is why its Mean (36.54 ms) lands *below* its p50: a right-skewed
+  distribution with a long tail.
+- **ADS** has the highest **mean** (40.21 ms) but the **tightest
+  range** (19.8–65.0 ms), and the lowest absolute Max among OPC UA and
+  ADS. The elevated baseline is expected from the extra hops through
+  the AMS router, but ADS is the **most stable** transport (no outlier
+  above 65 ms).
+- **Snap7 vs TCP-JSON:** statistically tied on this run. Snap7 has the
+  tighter tail (Max 53.64 ms vs 200.64 ms), making it the cleaner
+  choice when a **hard upper bound** on cycle time matters.
+
+> **Probe health:** `probe_rejected == 0` and
+> `probe_order_violations == 0` in all four runs, meaning the tag
+> chain was complete and well-ordered across every recorded sample.
 
 ## Recent Changes
 
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entries:
 
+**Unreleased — Protocol Comparison (ADS / OPC UA / Snap7 / TCP-JSON):**
+- **Measured full-loop `cycle_ns`** across all four transports on the
+  same Docker/VM environment. Results and LBP table added under
+  [Protocol Comparison](#protocol-comparison-measured--v40-dockervm).
+- **Key finding:** Snap7 and TCP-JSON are statistically tied
+  (mean ≈ 23 ms, p50 ≈ 19 ms); Snap7 has a tighter tail
+  (Max 53.64 ms vs 200.64 ms). OPC UA has a higher p50 but catastrophic
+  outliers (Max 178.78 ms). ADS has the highest mean (40.21 ms) but the
+  tightest range (19.8–65.0 ms).
+- **Probe health:** `probe_rejected == 0`, `probe_order_violations == 0`
+  in all four runs.
+
 **Unreleased — Beckhoff TwinCAT 3 (ADS) Support:**
-- **New `ads` transport:** Native integration of `pyads` to communicate with Beckhoff TwinCAT 3 PLCs.
-- **Documentation:** Added a comprehensive setup and troubleshooting guide for TwinCAT in `vendor-neutral/docs/beckhoff_ads_setup.md`.
-- **Docker verification:** ADS connection tested successfully inside the `isaac_reference_v3` container (`--network host`). All 4 pytest tests pass in 0.04 s.
+- **New `ads` transport:** Native integration of `pyads` to communicate
+  with Beckhoff TwinCAT 3 PLCs.
+- **Documentation:** Added a comprehensive setup and troubleshooting
+  guide for TwinCAT in
+  `vendor-neutral/docs/beckhoff_ads_setup.md`.
+- **Docker verification:** ADS connection tested successfully inside
+  the `isaac_reference_v3` container (`--network host`). All 4 pytest
+  tests pass in 0.04 s.
+
+**Unreleased — Siemens S7 (Snap7) Support:**
+- **New `snap7` transport:** Native integration of `python-snap7`
+  (`>= 3.0`).
+- **Schema v2.5:** New `PlcConfig.rack`/`PlcConfig.slot` for S7;
+  `SignalConfig.db_num`/`byte_offset`/`bit_offset` for absolute S7
+  addressing; `SignalConfig.s7_type` (`bool` | `int16` | `int32` |
+  `lreal`) to distinguish Int vs DInt and pick the correct `snap7.util`
+  decoder.
+- **`Snap7Driver`:** groups reads by DB, does a single `db_read` per
+  group, and supports `db_read`/`db_write` per signal on write.
+- **Measured:** full-loop `cycle_ns` mean **23.11 ms**, p99 **39.35 ms**,
+  Max **53.64 ms** on Docker/VM — see
+  [Protocol Comparison](#protocol-comparison-measured--v40-dockervm).
 
 **v4.0.0 — Industrial Type-Safety Overhaul (2026-10-29):**
-- **`bridge_config.py` — Schema v2.2.** Per-signal `min`/`max`/`strict`/`reject_non_finite`/`allow_int_for_float`; `strict_types` and `strict_type_handshake` on `BridgeConfig`; `publish[].type` must equal `signals[].type`.
-- **`plc_ros_bridge.py` — `_get` is a validator, not a coercer.** In `strict_types=True`, `str→int` (`int("5")`), `float→int` truncation (`int(3.9) → 3`), `int→bool`, `NaN`/`Inf`, and out-of-range values are all rejected with per-signal counters. `strict_types=False` falls back to v3.7 behaviour but still applies `_to_int_checked` (no silent truncation) and `_to_finite_float` (no silent NaN).
-- **`plc_ros_bridge.py` — `_wire_type_check` at the driver boundary.** `TcpJson`, `OpcUa`, `PlcApi` all reject type mismatches (`"ERR:TYPE:..."`), not silent coercions. `bool` is never accepted as `int`.
-- **`plc_ros_bridge.py` — boot-time type handshake.** `TcpJsonDriver.get_server_types()` compares config types against the server's declared types. `strict_type_handshake: true` aborts on mismatch.
-- **`plc_server_win.py` — `types` command + `allow_nan=False` + `_sanitize`.** NaN/Inf converted to `"ERR:non_finite"` per tag; errors during reply serialization are caught and re-emitted as JSON errors.
-- **`physics_twin.py` / `trajectory_twin.py` — NaN/Inf guards.** `on_setpoint`, `on_cmd`, `on_js`, `_publish`, `_seed`, `_refresh` all reject non-finite values; per-joint `_stats` counters and throttled `_warn`.
-- **`plc_ros_bridge.py` — `_js_tag` NaN guard before `act_ang` write.** Prevents a `NaN` from silently freezing a joint (deadband would return `False` forever).
+- **`bridge_config.py` — Schema v2.2.** Per-signal
+  `min`/`max`/`strict`/`reject_non_finite`/`allow_int_for_float`;
+  `strict_types` and `strict_type_handshake` on `BridgeConfig`;
+  `publish[].type` must equal `signals[].type`.
+- **`plc_ros_bridge.py` — `_get` is a validator, not a coercer.** In
+  `strict_types=True`, `str→int` (`int("5")`), `float→int` truncation
+  (`int(3.9) → 3`), `int→bool`, `NaN`/`Inf`, and out-of-range values
+  are all rejected with per-signal counters. `strict_types=False` falls
+  back to v3.7 behaviour but still applies `_to_int_checked` (no silent
+  truncation) and `_to_finite_float` (no silent NaN).
+- **`plc_ros_bridge.py` — `_wire_type_check` at the driver boundary.**
+  `TcpJson`, `OpcUa`, `PlcApi` all reject type mismatches
+  (`"ERR:TYPE:..."`), not silent coercions. `bool` is never accepted
+  as `int`.
+- **`plc_ros_bridge.py` — boot-time type handshake.**
+  `TcpJsonDriver.get_server_types()` compares config types against the
+  server's declared types. `strict_type_handshake: true` aborts on
+  mismatch.
+- **`plc_server_win.py` — `types` command + `allow_nan=False` +
+  `_sanitize`.** NaN/Inf converted to `"ERR:non_finite"` per tag;
+  errors during reply serialization are caught and re-emitted as JSON
+  errors.
+- **`physics_twin.py` / `trajectory_twin.py` — NaN/Inf guards.**
+  `on_setpoint`, `on_cmd`, `on_js`, `_publish`, `_seed`, `_refresh`
+  all reject non-finite values; per-joint `_stats` counters and
+  throttled `_warn`.
+- **`plc_ros_bridge.py` — `_js_tag` NaN guard before `act_ang` write.**
+  Prevents a `NaN` from silently freezing a joint (deadband would
+  return `False` forever).
 - **`PlcApiDriver` default instance `"296"`** (was `"ros2_"`).
-- **Tests:** **86 pytest** (was 51) + **9 standalone** (was 8). New `test_industrial_patch.py` (12 tests) covers act_ang write policy, estop lock, deadline counting, physics estop latch.
-- **`plc_ros_bridge.yaml`:** `schema_version: "2.2"`, `strict_types: true`, `strict_type_handshake: true`, per-signal `min`/`max`, `velocity_scale.max` corrected to `1000.0` (was `100.0`; PLC sends `500.0`).
+- **Tests:** **86 pytest** (was 51) + **9 standalone** (was 8). New
+  `test_industrial_patch.py` (12 tests) covers act_ang write policy,
+  estop lock, deadline counting, physics estop latch.
+- **`plc_ros_bridge.yaml`:** `schema_version: "2.2"`, `strict_types:
+  true`, `strict_type_handshake: true`, per-signal `min`/`max`,
+  `velocity_scale.max` corrected to `1000.0` (was `100.0`; PLC sends
+  `500.0`).
 - **`robot.yaml`:** `warn_cooldown: 5.0`.
-- **Impact (Docker/VM, 363 s, mostly stationary joints, not reference machine):** `convert_pub` p99 = **0.13 ms** (was 0.12 ms in v3.7; +0.01 ms = ~10 µs — the only stage v4.0 touches). Every other stage unchanged or improved: `ros_ruckig` p99 −8%, `isaac_step` p99 −7%, `ros_back` p99 −25%, `queue_delay` p99 −1%. `write_net` p50 differed (7.86 vs 4.69 ms) because the motion pattern differed (3.0 rows/s vs 15.7 rows/s in v3.7); v4.0 has no code in that path. Server `cmd_sync` mean 1.8–2.3 ms. `probe_attempted == probe_rows`, `probe_rejected == 0`, `write_failed == 0`, `signal_rejections_total == 0`.
+- **Impact (Docker/VM, 363 s, mostly stationary joints, not reference
+  machine):** `convert_pub` p99 = **0.13 ms** (was 0.12 ms in v3.7;
+  +0.01 ms = ~10 µs — the only stage v4.0 touches). Every other stage
+  unchanged or improved: `ros_ruckig` p99 −8%, `isaac_step` p99 −7%,
+  `ros_back` p99 −25%, `queue_delay` p99 −1%. `write_net` p50 differed
+  (7.86 vs 4.69 ms) because the motion pattern differed (3.0 rows/s vs
+  15.7 rows/s in v3.7); v4.0 has no code in that path. Server
+  `cmd_sync` mean 1.8–2.3 ms. `probe_attempted == probe_rows`,
+  `probe_rejected == 0`, `write_failed == 0`,
+  `signal_rejections_total == 0`.
 
 **v3.7.0 — Probe Observability + Production Path:**
-- **`plc_ros_bridge.py` — `probe_attempted` counter (new).** Distinguishes "bridge didn't publish a tag" (`probe_sent == 0`) from "tag arrived but was rejected" (`probe_attempted > probe_rows`).
-- **`plc_ros_bridge.py` — `_js_tag` starvation fix.** `probe_rows/probe_attempted` rose from 7.5% to **100%**.
-- **`plc_ros_bridge.py` — same-tick `act_ang` write.** `write_net` p50 −24%.
-- **`trajectory_twin.py` — multiple fixes.** Passive axis not interpolated; `set_target` called after `reset()`; `RuckigPlanner` validates all parameters; tag consumed only by `_publish`.
-- **`physics_twin.py` — `DEFAULT_PUBLISH_HZ = 120.0` (was 60.0).** `_applied_tag` survives multiple publishes; 7-part `frame_id` in >90% of messages.
+- **`plc_ros_bridge.py` — `probe_attempted` counter (new).**
+  Distinguishes "bridge didn't publish a tag" (`probe_sent == 0`) from
+  "tag arrived but was rejected" (`probe_attempted > probe_rows`).
+- **`plc_ros_bridge.py` — `_js_tag` starvation fix.**
+  `probe_rows/probe_attempted` rose from 7.5% to **100%**.
+- **`plc_ros_bridge.py` — same-tick `act_ang` write.** `write_net`
+  p50 −24%.
+- **`trajectory_twin.py` — multiple fixes.** Passive axis not
+  interpolated; `set_target` called after `reset()`; `RuckigPlanner`
+  validates all parameters; tag consumed only by `_publish`.
+- **`physics_twin.py` — `DEFAULT_PUBLISH_HZ = 120.0` (was 60.0).**
+  `_applied_tag` survives multiple publishes; 7-part `frame_id` in
+  >90% of messages.
 - **`joint_mapper.py` (new)** — standalone module for Isaac + Linux.
-- **`analyze_probe.py`** — new options `--plot`, `--poll-hz`, `--export-clean`.
+- **`analyze_probe.py`** — new options `--plot`, `--poll-hz`,
+  `--export-clean`.
 - **Tests:** 51 pytest + 8 standalone (was 29 + 10).
 - **`plc_ros_bridge.yaml`: `poll_hz: 120 → 200`.**
-- **Impact (Docker/VM, not reference machine):** median `cmd_to_feedback` 18.55 → **14.62 ms** (−21%); p95 22.62 ms; p99 35.50 ms; median `total_loop` 25.72 → **19.21 ms** (−25%); LBP ≤ 20 ms 59.17% → **91.40%** (+32pp); `write_failed` = 0 (was persistent); `probe_attempted == probe_rows == 1396` (100% capture).
+- **Impact (Docker/VM, not reference machine):** median
+  `cmd_to_feedback` 18.55 → **14.62 ms** (−21%); p95 22.62 ms; p99
+  35.50 ms; median `total_loop` 25.72 → **19.21 ms** (−25%); LBP ≤
+  20 ms 59.17% → **91.40%** (+32pp); `write_failed` = 0 (was
+  persistent); `probe_attempted == probe_rows == 1396` (100% capture).
 
 **v3.6.0 — Latency-Probe Chain Fixes:**
-- **`_js_tag` starvation fix** — tag consumed only on actual `act_ang` write.
+- **`_js_tag` starvation fix** — tag consumed only on actual `act_ang`
+  write.
 - **`_cmd_tag` consumed only by `_publish`** (was consumed every tick).
-- **`_applied_tag` survives multiple publishes** (was consumed on first publish).
+- **`_applied_tag` survives multiple publishes** (was consumed on first
+  publish).
 - **Same-tick `act_ang` write** — `write_net` p50 −24%.
 
 **v3.5.0 — Trajectory Twin Fixes:**
@@ -175,11 +326,15 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entries:
 - **`_publish` no longer uses `np.interp`** on passive axes.
 
 **v3.1.3 — PLC Batch Mode + 120 Hz Tuning:**
-- **`windows/plc_server_win.py` — batch PLC I/O enabled by default.** **Fixed:** `_TYPE_NAMES` maps `LReal→Double`, `DInt→Int32`, `Int→Int16` (EPrimitiveDataType uses .NET names, not Siemens names).
+- **`windows/plc_server_win.py` — batch PLC I/O enabled by default.**
+  **Fixed:** `_TYPE_NAMES` maps `LReal→Double`, `DInt→Int32`,
+  `Int→Int16` (EPrimitiveDataType uses .NET names, not Siemens names).
 - **`config/plc_ros_bridge.yaml`: `poll_hz: 60 → 120`.**
 - **`ros2/analyze_probe.py` (new)** — offline CSV analysis.
 - **`ros2/test_probe_chain.py` (new)** — 10 standalone tests.
-- **Impact (Docker/VM):** median `cmd_to_feedback` 34.60 → **18.55 ms** (−46%); median `total_loop` 45.95 → **25.72 ms** (−44%).
+- **Impact (Docker/VM):** median `cmd_to_feedback` 34.60 →
+  **18.55 ms** (−46%); median `total_loop` 45.95 → **25.72 ms**
+  (−44%).
 
 **v3.1.2 — Performance Fixes for VM Environments:**
 - **`plc_ros_bridge.py` — PLC I/O moved to a dedicated thread.**
@@ -188,30 +343,39 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list. Latest entries:
 
 **v3.1.1 — Environment Transparency and Real VM Results:**
 - **README:** added `Environment` section and `Results (this machine)`.
-- **Fix:** a persistent out-of-limits command no longer cancels an in-progress brake.
-- **Fix:** on PLC reconnect, the bridge no longer publishes `/plc/emergency_stop = False` before the real PLC e-stop value has been read.
+- **Fix:** a persistent out-of-limits command no longer cancels an
+  in-progress brake.
+- **Fix:** on PLC reconnect, the bridge no longer publishes
+  `/plc/emergency_stop = False` before the real PLC e-stop value has
+  been read.
 - Added the Safety Notice above.
-
----
 
 ## Latency Performance
 
 > **Reference machine only.** All numbers in this section are from the
 > **native Ubuntu 24.04** reference machine described in
 > [Environment](#environment). They predate v3.1.3. See
-> [Results (this machine)](#results-this-machine) for VM numbers, which
-> use different metrics and are **not directly comparable**.
+> [Protocol Comparison](#protocol-comparison-measured--v40-dockervm)
+> and [Results (this machine)](#results-this-machine) for the newer
+> Docker/VM numbers, which use **different metrics** and are **not
+> directly comparable**.
 
 Measured across all transports (see
 [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md)
 for the full report):
 
-| Transport                | Mean       | p99        | Max        | Full Loop |
-|:-------------------------|:----------:|:----------:|:----------:|:---------:|
-| OPC UA (naive)           | 11.5 ms    | 14 ms      | 100 ms     | ~20 ms    |
-| TCP-JSON (naive)         | 12.5 ms    | 20 ms      | 233 ms     | ~25 ms    |
-| **TCP-JSON (optimized)** | **5.2 ms** | **15.5 ms**| **16.3 ms**| **~15 ms**|
-| **ADS (Beckhoff)**       | TBD        | TBD        | TBD        | TBD       |
+| Transport                | Mean       | p99         | Max         | Full Loop |
+| :----------------------- | :--------: | :---------: | :---------: | :-------: |
+| OPC UA (naive)           | 11.5 ms    | 14 ms       | 100 ms      | ~20 ms    |
+| TCP-JSON (naive)         | 12.5 ms    | 20 ms       | 233 ms      | ~25 ms    |
+| **TCP-JSON (optimized)** | **5.2 ms** | **15.5 ms** | **16.3 ms** | **~15 ms**|
+| **ADS (Beckhoff)**       | see [Protocol Comparison](#protocol-comparison-measured--v40-dockervm) | — | — | — |
+
+> The **ADS** row is now measured under
+> [Protocol Comparison](#protocol-comparison-measured--v40-dockervm)
+> using the full-loop `cycle_ns` metric — a **different metric** from
+> the columns above (which refer to the reference machine on v3.1.2 and
+> earlier).
 
 **Optimization techniques applied (TCP-JSON):**
 
@@ -225,26 +389,24 @@ for the full report):
 enabled), **100% of full-loop samples stayed under 20 ms** — well within
 the control cycle for medium-speed industrial applications.
 
----
-
 ### Results (this machine — v4.0 vs v3.7)
 
 Measured on a **different environment** than the reference machine:
 
-| Item         | Value                                  |
-| :----------- | :------------------------------------- |
-| OS           | Ubuntu 24.04 (Docker)                  |
-| CPU          | Shared vCPU (24 cores, `taskset`)      |
-| GPU          | RTX 5060, 8 GB                         |
-| PLC server   | PLCSIM Advanced V6.0, TCP/JSON         |
-| ROS 2        | Jazzy                                  |
-| RMW          | FastDDS                                |
+| Item       | Value                          |
+| :--------- | :----------------------------- |
+| OS         | Ubuntu 24.04 (Docker)          |
+| CPU        | Shared vCPU (24 cores, `taskset`) |
+| GPU        | RTX 5060, 8 GB                 |
+| PLC server | PLCSIM Advanced V6.0, TCP/JSON |
+| ROS 2      | Jazzy                          |
+| RMW        | FastDDS                        |
 
 **Full-loop latency** (v4.0: 363 s, `cmd_ang: [cmd_ang]`, mostly
 stationary joints; v3.7: 88.7 s, 15.7 rows/s):
 
 | Stage                  | v3.7 p50    | **v4.0 p50** | v3.7 p99    | **v4.0 p99** |
-|:-----------------------|------------:|-------------:|------------:|-------------:|
+| :--------------------- | ----------: | -----------: | ----------: | -----------: |
 | `queue_delay`          |    3.12 ms  |     3.10 ms  |    3.62 ms  |     3.60 ms  |
 | `read_net`             |    1.69 ms  |     1.80 ms  |   10.27 ms  |    12.29 ms  |
 | **`convert_pub`**      | **0.05 ms** | **0.05 ms**  | **0.12 ms** | **0.13 ms**  |
@@ -267,7 +429,7 @@ window); **v4.0 has no code in that path**. Server-side timing
 **LBP (Latency Bound Probability) — `cmd_to_feedback`:**
 
 | Threshold | v3.7    | **v4.0**  |
-|:----------|--------:|----------:|
+| :-------- | ------: | --------: |
 | ≤ 10 ms   | 19.91%  | 13.71%    |
 | ≤ 15 ms   | 59.31%  | 38.47%    |
 | ≤ 20 ms   | 91.40%  | 63.82%    |
@@ -285,7 +447,7 @@ The LBP shifts below 20 ms are the environmental effect described above
 **Comparison v3.1.3 → v3.7 (same VM, for reference):**
 
 | Stage             | v3.1.3   | **v3.7**     |     Δ |
-|:------------------|---------:|-------------:|------:|
+| :---------------- | -------: | -----------: | ----: |
 | `queue_delay`     | 5.87 ms  | **3.08 ms**  |  −48% |
 | `read_net`        | 1.36 ms  | 1.72 ms      |  +26% |
 | `ros_ruckig`      | 4.32 ms  | **3.08 ms**  |  −29% |
@@ -299,8 +461,6 @@ The reference machine has **not** been re-measured for v3.7 or v4.0.
 The reference numbers (5.2 ms mean, 16.3 ms max) still refer to v3.1.2
 and earlier.
 
----
-
 ## Future Vision
 
 The vendor-neutral philosophy is being extended to encompass broader
@@ -309,8 +469,22 @@ itself.
 
 ### 1. Unified Control Layer (Multi-PLC Vendor expansion)
 
-- **Beckhoff TwinCAT 3 (ADS) — Implemented:** Native support for Beckhoff TwinCAT 3 is now integrated into our vendor-neutral architecture. It uses the ADS protocol (via `pyads`) and allows seamless swapping between Siemens S7-1500 and Beckhoff TwinCAT controllers by simply adjusting the YAML runtime mapping files. See the [TwinCAT Setup Guide](vendor-neutral/docs/beckhoff_ads_setup.md) for details.
-- **Additional PLC vendors** will be considered as the abstraction matures.
+- **Beckhoff TwinCAT 3 (ADS) — Implemented & measured:** Native support
+  for Beckhoff TwinCAT 3 is integrated into our vendor-neutral
+  architecture. It uses the ADS protocol (via `pyads`) and allows
+  seamless swapping between Siemens S7-1500 and Beckhoff TwinCAT
+  controllers by editing the YAML runtime mapping files. Full-loop
+  `cycle_ns` mean **40.21 ms**, p99 **52.87 ms**, Max **64.96 ms** on
+  Docker/VM — see
+  [Protocol Comparison](#protocol-comparison-measured--v40-dockervm).
+  See also
+  [`vendor-neutral/docs/beckhoff_ads_setup.md`](vendor-neutral/docs/beckhoff_ads_setup.md).
+- **Siemens S7 (Snap7) — Implemented & measured:** Native S7comm via
+  `python-snap7`. Full-loop `cycle_ns` mean **23.11 ms**, p99
+  **39.35 ms**, Max **53.64 ms** on Docker/VM — the tightest tail of
+  the four transports measured in this run.
+- **Additional PLC vendors** will be considered as the abstraction
+  matures.
 
 ### 2. Multi-Simulator Agnostic Framework
 
@@ -320,8 +494,8 @@ itself.
   multi-simulator support.
 
 The long-term goal is a fully portable digital twin: change the robot,
-the PLC ecosystem (Siemens/TwinCAT), or the simulator by editing
-configuration — not by rewriting the core platform.
+the PLC ecosystem (Siemens/TwinCAT/OPC UA/TCP-JSON), or the simulator
+by editing configuration — not by rewriting the core platform.
 
 ### 3. Industrial Type-Safety (v4.0 baseline)
 
@@ -333,11 +507,9 @@ will not abort but attempt a well-defined conversion (with a
 warning) and record it in the audit log — so migrations from v3.x
 to a stricter type model can be staged per signal.
 
----
-
 ## Repository Layout
 
-```
+````text
 .
 ├── vendor-neutral/              # Active — Gen 4 (v4.0.0)
 │   ├── README.md                # Full Gen 4 documentation
@@ -353,13 +525,11 @@ to a stricter type model can be staged per signal.
 ├── yaskawa/                     # Gen 2 — Yaskawa GP110 (OPC UA)
 ├── docs/                        # Cross-generation documentation
 └── README.md                    # This file
-```
-
----
+````
 
 ## Quick Start (Gen 4 / v4.0.0)
 
-```bash
+````bash
 cd vendor-neutral
 
 # 1. Windows: TCP/JSON server (only if driver: tcp_json)
@@ -368,7 +538,9 @@ cd windows && python plc_server_win.py --host 0.0.0.0 --port 5000
 # 2. Isaac Sim Script Editor: run isaac/physics_twin.py
 
 # 3. Linux: PLC bridge (with CPU pinning for latency)
-#    Note: Set driver: "ads" in your config to connect to Beckhoff TwinCAT.
+#    Note: Set driver: "ads" to connect to Beckhoff TwinCAT,
+#          or driver: "snap7" to connect to a Siemens S7-1500
+#          over S7comm.
 cd linux
 taskset -c 8,9 python3 plc_ros_bridge.py \
     --ros-args -p config:=../config/plc_ros_bridge.yaml
@@ -376,41 +548,37 @@ taskset -c 8,9 python3 plc_ros_bridge.py \
 # 4. Linux: trajectory twin (Ruckig + state machine)
 taskset -c 10 python3 trajectory_twin.py \
     --ros-args -p robot:=../config/robot.yaml
-```
+````
 
 On startup, verify the five v4.0 health markers in the bridge log:
 
-```
-config_loaded        schema_version=2.2
+````text
+config_loaded        schema_version=2.3
 bridge_started       strict_types=True
 type_handshake_ok    checked=29
-plc_connected        driver=tcp_json backoff_s=1.0
+plc_connected        driver=<tcp_json|opcua|ads|snap7> backoff_s=1.0
 tick_stats           signal_rejections_total=0
-```
+````
 
 Full instructions: [`vendor-neutral/README.md`](vendor-neutral/README.md).
 
----
-
 ## Documentation
 
-| Document                                                                                 | Description                               |
-| :--------------------------------------------------------------------------------------- | :-----------------------------------------|
-| [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 4 (active) — vendor-neutral platform  |
+| Document                                                                                 | Description                                        |
+| :--------------------------------------------------------------------------------------- | :------------------------------------------------- |
+| [`vendor-neutral/README.md`](vendor-neutral/README.md)                                   | Gen 4 (active) — vendor-neutral platform           |
 | [`vendor-neutral/docs/beckhoff_ads_setup.md`](vendor-neutral/docs/beckhoff_ads_setup.md) | TwinCAT 3 (ADS) setup, routes, and troubleshooting |
-| [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports |
-| [`kuka/README.md`](kuka/README.md)                                                       | Gen 1 — KUKA KR210                        |
-| [`yaskawa/docs/README.md`](yaskawa/docs/README.md)                                       | Gen 2 — Yaskawa GP110                     |
-| [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                           |
-| [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                   |
-
----
+| [`vendor-neutral/docs/latency_comparison.md`](vendor-neutral/docs/latency_comparison.md) | Full latency comparison across transports          |
+| [`kuka/README.md`](kuka/README.md)                                                       | Gen 1 — KUKA KR210                                 |
+| [`yaskawa/docs/README.md`](yaskawa/docs/README.md)                                       | Gen 2 — Yaskawa GP110                              |
+| [`CHANGELOG.md`](CHANGELOG.md)                                                           | All generations                                    |
+| [`docs/comparison.md`](docs/comparison.md)                                               | Side-by-side comparison                            |
 
 ## How to Cite
 
 If you use this software in academic work, please cite:
 
-```bibtex
+````bibtex
 @software{damsarkho2026isaac,
   author       = {Damsarkho, Nebras},
   title        = {{Isaac Digital Twin — Vendor-Neutral Platform for
@@ -422,15 +590,13 @@ If you use this software in academic work, please cite:
   doi          = {10.5281/zenodo.23312012},
   url          = {https://doi.org/10.5281/zenodo.23312012}
 }
-```
+````
 
 Or in plain text:
 
 > Damsarkho, N. (2026). *Isaac Digital Twin — Vendor-Neutral Platform
 > for PLC, ROS 2, and Isaac Sim* (Version 4.0.0) [Computer software].
 > Zenodo. https://doi.org/10.5281/zenodo.23312012
-
----
 
 ## Contact
 
