@@ -26,6 +26,9 @@ robot:
 
   ruckig:
     control_hz: 120.0
+    enabled: true
+    test_mode_passthrough: true # Test Mode Without Ruckig
+    #test_mode_passthrough: false # Test Mode With Ruckig
     jump_threshold_rad: 0.30
     # Per-axis limits
     max_vel:  [6.0, 6.0, 6.0, 10.0]
