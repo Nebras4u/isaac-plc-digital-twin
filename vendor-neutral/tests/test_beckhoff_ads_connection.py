@@ -1,18 +1,18 @@
-# vendor-neutral/tests/test_beckhoff_ads_connection.py
-# اختبارات TwinCAT 3 (ADS) - مبنية على tc_R.py و tc_W.py
+# tests/test_beckhoff_ads_connection.py
+# اختبارات TwinCAT 3 (ADS) - البديل الرسمي لاختبارات Siemens
 
 import pyads
 import pytest
 
-# --- العناوين التي نجحت في الاختبار ---
-TARGET_AMS = "111.111.111.3.1.1"
-TARGET_IP = "192.168.50.1"
-LOCAL_AMS = "192.168.50.2.1.1"
+# --- العناوين الحقيقية التي نجحت في بيئتك ---
+TARGET_AMS = "192.168.122.215.1.1"
+TARGET_IP = "192.168.122.215"
+LOCAL_AMS = "192.168.122.1.1.1"
 PORT = pyads.PORT_TC3PLC1  # 851
 
-# --- أسماء المتغيرات في مشروع TwinCAT ---
+# --- أسماء المتغيرات في مشروع TwinCAT (تأكد من مطابقتها) ---
 VAR_BOOL = "MAIN.bRosOnline"
-VAR_LREAL = "GVL.MainRobotLeft.CmdAng[1]"
+VAR_REAL = "GVL.CmdAng"  # لاحظ أننا غيرناها إلى REAL
 
 
 @pytest.fixture(scope="module")
@@ -44,26 +44,26 @@ def test_read_bool(plc_connection):
         pytest.fail(f"فشلت قراءة {VAR_BOOL}: {e}")
 
 
-def test_read_lreal_array_element(plc_connection):
-    """اختبار قراءة عنصر من مصفوفة LREAL."""
+def test_read_real(plc_connection):
+    """اختبار قراءة متغير Real (32-bit)."""
     try:
-        val = plc_connection.read_by_name(VAR_LREAL, pyads.PLCTYPE_LREAL)
+        val = plc_connection.read_by_name(VAR_REAL, pyads.PLCTYPE_REAL)
         assert isinstance(val, float)
-        print(f"\n{VAR_LREAL} = {val}")
+        print(f"\n{VAR_REAL} = {val}")
     except Exception as e:
-        pytest.fail(f"فشلت قراءة {VAR_LREAL}: {e}")
+        pytest.fail(f"فشلت قراءة {VAR_REAL}: {e}")
 
 
-def test_write_lreal_array_element(plc_connection):
-    """اختبار كتابة عنصر من مصفوفة LREAL والتحقق من القراءة."""
+def test_write_real_and_read_back(plc_connection):
+    """اختبار كتابة متغير Real والتحقق من القراءة."""
     try:
-        original = plc_connection.read_by_name(VAR_LREAL, pyads.PLCTYPE_LREAL)
+        original = plc_connection.read_by_name(VAR_REAL, pyads.PLCTYPE_REAL)
         new_value = original + 1.0
-        plc_connection.write_by_name(VAR_LREAL, new_value, pyads.PLCTYPE_LREAL)
-        read_back = plc_connection.read_by_name(VAR_LREAL, pyads.PLCTYPE_LREAL)
-        assert abs(read_back - new_value) < 1e-6, (
+        plc_connection.write_by_name(VAR_REAL, new_value, pyads.PLCTYPE_REAL)
+        read_back = plc_connection.read_by_name(VAR_REAL, pyads.PLCTYPE_REAL)
+        assert abs(read_back - new_value) < 1e-3, (
             f"الكتابة فشلت: كتبنا {new_value} لكن قرأنا {read_back}"
         )
-        print(f"\n{VAR_LREAL}: {original} -> {new_value} -> {read_back}")
+        print(f"\n{VAR_REAL}: {original} -> {new_value} -> {read_back}")
     except Exception as e:
-        pytest.fail(f"فشلت كتابة/قراءة {VAR_LREAL}: {e}")
+        pytest.fail(f"فشلت كتابة/قراءة {VAR_REAL}: {e}")
