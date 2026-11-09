@@ -2,6 +2,12 @@
 # Vendor-neutral Ruckig-based trajectory generator.
 # Reads robot definition from robot.yaml.
 #
+# v4.1 — `ruckig.enabled` (robot.yaml, default true):
+#   * false -> PassthroughPlanner: no jerk/acc shaping, the setpoint
+#     goes straight to the commanded target.  Limits, state machine,
+#     watchdogs and v4.0 validation are unchanged.  ruckig.control_hz
+#     still sets the servo loop rate.
+#
 # v4.0 — industrial type-safety (mirrors plc_ros_bridge.py / physics_twin.py):
 #   * on_js  : name/position length check, per-joint type check, NaN/Inf
 #              rejection. Refuses to contaminate _actual[] with non-finite.
@@ -57,6 +63,95 @@ def _validate_limits(limits_deg, joints):
             raise ValueError(f"joint '{j}': lower {lo}° >= upper {hi}°")
         if hi - lo > 720.0:
             raise ValueError(f"joint '{j}': range {hi - lo:.1f}° is implausibly large")
+
+
+class PassthroughPlanner:
+    """Planner with the RuckigPlanner API but NO trajectory smoothing.
+
+    Used when robot.yaml has `ruckig.enabled: false`.  The limit checks, the
+    state machine, the watchdogs and the v4.0 validation in TrajectoryTwin
+    still apply; only the jerk/acceleration shaping is bypassed, so the
+    setpoint jumps straight to the commanded target.
+    """
+
+    def __init__(self, dof):
+        self.dof = dof
+        self._initialized = False
+        self._stopped     = True
+        self._braking     = False
+        self._has_target  = False
+        self._last_pos    = np.zeros(dof)
+        self._target_pos  = np.zeros(dof)
+
+    def reset(self, m):
+        np.copyto(self._last_pos, np.asarray(m, dtype=np.float64))
+        self._initialized = True
+        self._has_target  = False
+        self._braking     = False
+        self._stopped     = False
+
+    def set_target(self, t):
+        t = np.asarray(t, dtype=np.float64)
+        if not np.all(np.isfinite(t)):
+            return False
+        np.copyto(self._target_pos, t)
+        self._has_target = True
+        return True
+
+    def sync_state(self, m):
+        m = np.asarray(m, dtype=np.float64)
+        if not np.all(np.isfinite(m)):
+            return
+        np.copyto(self._last_pos, m)
+
+    def start_brake(self):
+        self._braking = True
+        self._stopped = False
+
+    def step(self):
+        if not self._initialized:
+            return None
+        if self._braking:
+            self._stopped = True          # hold the measured position
+            return self._last_pos.copy()
+        if not self._has_target:
+            return self._last_pos.copy()
+        return self._target_pos.copy()
+
+    @property
+    def stopped(self):
+        return self._stopped
+
+
+def build_planner(r, dof):
+    """Planner from the robot.yaml `ruckig:` section.
+
+    `enabled` (default true) must be a real YAML bool.  When false only
+    `control_hz` is needed (it still sets the servo loop rate).
+    """
+    enabled = r.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ValueError(
+            f"ruckig.enabled must be true or false, got {enabled!r}")
+    hz = r["control_hz"]
+    if not enabled:
+        # Normal operation (Test_Mode=false, CmdEnable=true) must execute
+        # CmdAng through Ruckig ONLY. No pass-through bypass is allowed.
+        raise ValueError(
+            "ruckig.enabled=false is not allowed: every CmdAng must be "
+            "executed through Ruckig. Set ruckig.enabled: true in robot.yaml. "
+            "(For benchmarking only: ruckig.test_mode_passthrough: true "
+            "allows pass-through while /plc/test_mode is true.)")
+    return RuckigPlanner(
+        dof,
+        hz,
+        r.get("max_vel", 6.0),
+        r.get("max_acc", 20.0),
+        r.get("max_jerk", 400.0),
+        r.get("jump_threshold_rad", 0.3),
+        r.get("brake_acc_mult", 4.0),
+        r.get("brake_jerk_mult", 8.0),
+    )
 
 
 class RuckigPlanner:
@@ -209,16 +304,17 @@ class TrajectoryTwin(Node):
         self._warned        = {}
 
         r = cfg["ruckig"]
-        self.planner = RuckigPlanner(
-            self.ctrl_dof,
-            r["control_hz"],
-            r.get("max_vel", 6.0),
-            r.get("max_acc", 20.0),
-            r.get("max_jerk", 400.0),
-            r.get("jump_threshold_rad", 0.3),
-            r.get("brake_acc_mult", 4.0),
-            r.get("brake_jerk_mult", 8.0),
-        )
+        # Ruckig is the planner for normal operation. A pass-through planner
+        # exists ONLY for benchmarking and is used ONLY while Test_Mode is
+        # true AND robot.yaml sets ruckig.test_mode_passthrough: true.
+        self.planner_ruckig = build_planner(r, self.ctrl_dof)
+        pt = r.get("test_mode_passthrough", False)
+        if not isinstance(pt, bool):
+            raise ValueError(
+                f"ruckig.test_mode_passthrough must be true or false, got {pt!r}")
+        self.planner_pass = PassthroughPlanner(self.ctrl_dof) if pt else None
+        self.planner = self.planner_ruckig
+        self._test_mode = False     # unknown -> treated as normal (Ruckig)
 
         log_cfg = {"logging": cfg.get("logging", {})} if "logging" in cfg else {
             "logging": {"level": "INFO", "console": True, "to_ros": False,
@@ -283,6 +379,8 @@ class TrajectoryTwin(Node):
                                  self.on_enable, state_qos)
         self.create_subscription(Bool, "/plc/emergency_stop",
                                  self.on_estop, state_qos)
+        self.create_subscription(Bool, "/plc/test_mode",
+                                 self.on_test_mode, state_qos)
 
         self.create_timer(1.0 / r["control_hz"], self.servo_tick)
 
@@ -290,6 +388,7 @@ class TrajectoryTwin(Node):
             "robot":   self.robot_name,
             "dof":     self.ctrl_dof,
             "rate_hz": r["control_hz"],
+            "planner": type(self.planner).__name__,
         })
 
     # --------------------------------------------------------------------- #
@@ -359,7 +458,9 @@ class TrajectoryTwin(Node):
         for i, x in enumerate(msg.position[:n]):
             jname = self.controlled_joints[i]
             try:
-                f = float(x)
+                # /plc/cmd_ang carries RADIANS (bridge contract, same as
+                # /joint_states); everything below this point is in degrees.
+                f = math.degrees(float(x))
             except (TypeError, ValueError):
                 self._bump(jname, "bad_type")
                 self._warn(jname, f"bad cmd type: {type(x).__name__}")
@@ -392,6 +493,18 @@ class TrajectoryTwin(Node):
                 self.log.info("enable_changed", extra={"enable": new})
             self._enable = new
 
+    def on_test_mode(self, msg):
+        with self.lock:
+            new = bool(msg.data)
+            if new != self._test_mode:
+                self.log.info("test_mode_changed", extra={"test_mode": new})
+            self._test_mode = new
+
+    def _desired_planner(self, test_mode):
+        if test_mode and self.planner_pass is not None:
+            return self.planner_pass
+        return self.planner_ruckig
+
     def on_estop(self, msg):
         with self.lock:
             new = bool(msg.data)
@@ -420,6 +533,17 @@ class TrajectoryTwin(Node):
             last_applied  = self._last_applied_cmd_deg
             tag           = self._cmd_tag
             tag_t         = self._cmd_tag_t
+            test_mode     = self._test_mode
+
+        # Planner selection: only switch while IDLE; if the wanted planner
+        # differs while moving, brake first (Ruckig/pass-through never mix).
+        desired = self._desired_planner(test_mode)
+        mode_mismatch = desired is not self.planner
+        if mode_mismatch and self._state == IDLE:
+            self.planner = desired
+            mode_mismatch = False
+            self.log.info("planner_selected", extra={
+                "planner": type(desired).__name__, "test_mode": test_mode})
 
         fresh = has_actual and (now - last_js_t) <= 0.5
 
@@ -440,7 +564,8 @@ class TrajectoryTwin(Node):
         else:
             self._no_feedback_logged = False
 
-        want_run = enable and (not estop) and fresh and cmd_ok
+        want_run = enable and (not estop) and fresh and cmd_ok \
+            and not mode_mismatch
 
         np.copyto(self._ctrl_actual, actual[self.ctrl_indices])
 
@@ -495,6 +620,7 @@ class TrajectoryTwin(Node):
         # ---- brake path -----------------------------------------------
         elif (not want_run) and self._state == RUNNING:
             reason = ("estop"      if estop
+                      else "mode change" if mode_mismatch
                       else "disable" if not enable
                       else "no feedback" if not fresh
                       else "cmd timeout")
