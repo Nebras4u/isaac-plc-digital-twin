@@ -1997,7 +1997,7 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Contact
 
-- **YouTube:** [Digital Twin Series](https://www.youtube.com/playlist?list=PLYLnoPt4fbu8)
+- **YouTube:** [Digital Twin Series]([https://www.youtube.com/playlist?list=PLYLnoPt4fbu8](https://youtu.be/WJemdEiOvjo?si=-mcqD3JBq48y-0ik))
 - **Developer:** Nebras — nebras4u@gmail.com
 - **Repository:** [isaac-plc-digital-twin](https://github.com/Nebras4u/isaac-plc-digital-twin)
 
