@@ -21,6 +21,27 @@ The repository hosts multiple generations of the platform, side by side:
 | Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                                           | [`yaskawa/`](yaskawa/)               | Reference    |
 | Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                                         | [`kuka/`](kuka/)                     | Reference    |
 
+## Latest Scene Update: KUKA Glass-Picking Cell (Manual ROS 2 Phase)
+
+![KUKA Glass-Picking Cell — Isaac Sim & wcs_gui](https://raw.githubusercontent.com/Nebras4u/isaac-plc-digital-twin/main/vendor-neutral/docs/kuka_glass_picking.jpg)
+
+An active application scenario has been integrated into the simulation
+environment for **automated glass-sheet handling on a production line**:
+
+- **Simulation Scene (`physics_twin.py`):** Configured in NVIDIA Isaac Sim
+  with a **KUKA** industrial manipulator positioned alongside a glass
+  production conveyor line to perform glass-sheet picking operations.
+- **Control Interface (`wcs_gui.py`):** `physics_twin.py` now subscribes
+  to motion setpoints dispatched directly from the Warehouse/Workcell
+  Control System GUI (`wcs_gui.py`).
+- **Current Operating Phase (Manual ROS 2):** The cell currently operates
+  in a **manual commissioning phase**, where operator commands from
+  `wcs_gui.py` are transmitted as direct **ROS 2** joint/motion commands
+  to drive the simulated KUKA arm with full gravity and safety-watchdog
+  enforcement enabled.
+
+
+
 ## Safety Notice
 
 > **This project is a simulation / digital-twin research platform. It is

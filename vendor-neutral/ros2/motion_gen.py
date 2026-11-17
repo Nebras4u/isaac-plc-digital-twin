@@ -3,11 +3,16 @@
 
 Publishes /plc/cmd_ang with proper p; tags (5 parts).
 Traj adds sp_pub (6), physics adds js_pub (7), bridge records.
+
+NOTE: /plc/cmd_ang carries RADIANS (bridge contract, same as
+/joint_states). All values below are computed in DEGREES and then
+wrapped with math.radians() before publishing.
 """
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 import time, math, sys
+
 
 class MotionGen(Node):
     def __init__(self, duration_s):
@@ -29,15 +34,27 @@ class MotionGen(Node):
 
             msg = JointState()
             msg.header.frame_id = tag
-            msg.name = ['joint_1', 'joint_2', 'joint_3', 'joint_4']
-            # Sinusoids around home: (-90, +90)
-            # joint_1 ±30°, joint_2 -90±15°, joint_3 +90±15°, joint_4 ±20°
-            msg.position = [
-                30.0 * math.sin(2 * math.pi * 0.10 * t),
-                -90.0 + 15.0 * math.sin(2 * math.pi * 0.15 * t),
-                90.0 + 15.0 * math.sin(2 * math.pi * 0.15 * t + 1.0),
-                20.0 * math.sin(2 * math.pi * 0.20 * t),
+            msg.name = ['joint_a1', 'joint_a2', 'joint_a3',
+                        'joint_a4', 'joint_a5', 'joint_a6']
+
+            # Trajectories محسوبة بالدرجات لتناسب حدود KR210 L150:
+            #   joint_a1: ±185°     →  ±30°
+            #   joint_a2: -45..85°  →  -10° ± 20°
+            #   joint_a3: -210..65° →  -60° ± 40°
+            #   joint_a4: ±350°     →  ±20°
+            #   joint_a5: ±125°     →  ±10°
+            #   joint_a6: ±350°     →  ±45°
+            # /plc/cmd_ang يتوقع راديان — نلفّ كل قيمة بـ math.radians()
+            deg = [
+                30.0  * math.sin(2 * math.pi * 0.10 * t),
+                -10.0 + 20.0 * math.sin(2 * math.pi * 0.15 * t),
+                -60.0 + 40.0 * math.sin(2 * math.pi * 0.15 * t + 1.0),
+                20.0  * math.sin(2 * math.pi * 0.20 * t),
+                10.0  * math.sin(2 * math.pi * 0.25 * t),
+                45.0  * math.sin(2 * math.pi * 0.20 * t),
             ]
+            msg.position = [math.radians(d) for d in deg]
+
             self.pub.publish(msg)
             cmd_count += 1
             t += period
@@ -48,6 +65,7 @@ class MotionGen(Node):
                 time.sleep(delay)
 
         print(f"[motion_gen] done, {cmd_count} commands sent")
+
 
 def main():
     duration = int(sys.argv[1]) if len(sys.argv) > 1 else 300
@@ -60,6 +78,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
