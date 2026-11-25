@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org">
+  <ros2_control name="KukaSupervisor" type="system">
+    <hardware>
+      <plugin>kuka_supervised_control/KukaSupervisorSystem</plugin>
+
+      <!-- PLC connection -->
+      <param name="plc_ip">192.168.99.56</param>
+      <param name="plc_rack">0</param>
+      <param name="plc_slot">1</param>
+      <param name="db_proposal">100</param>
+      <param name="db_feedback">101</param>
+
+      <!-- Timing -->
+      <param name="period_s">0.020</param>
+      <param name="hb_timeout_s">0.100</param>
+      <param name="cmd_stale_timeout_s">0.100</param>
+      <param name="connect_timeout_s">3.0</param>
+      <param name="fail_on_comm_loss">false</param>
+
+      <!-- Real-time -->
+      <param name="enable_rt">false</param>
+      <param name="rt_priority">80</param>
+      <param name="rt_cpu_core">2</param>
+
+      <!-- Snap7 timeouts -->
+      <param name="recv_timeout_ms">40</param>
+      <param name="send_timeout_ms">40</param>
+      <param name="reconnect_min_ms">100</param>
+      <param name="reconnect_max_ms">2000</param>
+
+      <!-- Joint soft limits (degrees) -->
+      <param name="soft_min_deg">-185,-155,-120,-350,-125,-350</param>
+      <param name="soft_max_deg">185,35,160,350,125,350</param>
+    </hardware>
+
+    <joint name="joint_a1"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    <joint name="joint_a2"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    <joint name="joint_a3"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    <joint name="joint_a4"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    <joint name="joint_a5"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+    <joint name="joint_a6"><command_interface name="position"/><state_interface name="position"/><state_interface name="velocity"/></joint>
+  </ros2_control>
+</robot>

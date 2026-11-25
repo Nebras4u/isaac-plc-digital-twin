@@ -1,0 +1,7 @@
+<library path="kuka_supervised_control">
+  <class name="kuka_supervised_control/KukaSupervisorSystem"
+         type="kuka_supervised_control::KukaSupervisorSystem"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>ROS 2 proposes; PLC supervises. All safety decisions from PLC.</description>
+  </class>
+</library>

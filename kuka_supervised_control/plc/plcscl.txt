@@ -1,0 +1,199 @@
+FC_CalcCrc32:
+    #crc := DWORD#16#FFFF_FFFF;
+    FOR #i := 0 TO (#Length - 1) DO
+        #idx := DWORD_TO_INT((#crc XOR BYTE_TO_DWORD(#Buffer[#i])) AND DWORD#16#0000_00FF);
+        #crc := #CrcTable[#idx] XOR SHR(IN := #crc, N := 8);
+    END_FOR;
+    #FC_CalcCrc32 := #crc XOR DWORD#16#FFFF_FFFF;
+______
+FB_KukaSupervisor:
+    // 1. بناء جدول CRC32 مرة واحدة عند التشغيل
+    IF NOT #bInit THEN
+        FOR #i := 0 TO 255 DO
+            #dwCrc := INT_TO_DWORD(#i);
+            FOR #j := 0 TO 7 DO
+                IF (#dwCrc AND DWORD#16#0000_0001) <> DWORD#0 THEN
+                    #dwCrc := DWORD#16#EDB8_8320 XOR SHR(IN := #dwCrc, N := 1);
+                ELSE
+                    #dwCrc := SHR(IN := #dwCrc, N := 1);
+                END_IF;
+            END_FOR;
+            #crcTable[#i] := #dwCrc;
+        END_FOR;
+        #bInit := TRUE;
+    END_IF;
+    
+    #tick := #tick + 1;
+    "DB_PLC_Feedback".plc_heartbeat := "DB_PLC_Feedback".plc_heartbeat + 1;
+    
+    // 2. فك تسلسل DB100 (ROS) و DB39 (Plant) للتحقق من CRC
+    #pos := 0;
+    #retVal := Serialize(SRC_VARIABLE := "DB_ROS_Proposal", DEST_ARRAY => #rosBuf, POS := #pos);
+    #crcRosOk := ("FC_CalcCrc32"(Length := 68, Buffer := #rosBuf, CrcTable := #crcTable) = "DB_ROS_Proposal".crc)
+    AND ("DB_ROS_Proposal".version = 1);
+    
+    #pos := 0;
+    #retVal := Serialize(SRC_VARIABLE := "DB_Plant_To_PLC", DEST_ARRAY => #plantBuf, POS := #pos);
+    #crcPlantOk := ("FC_CalcCrc32"(Length := 104, Buffer := #plantBuf, CrcTable := #crcTable) = "DB_Plant_To_PLC".crc);
+    
+    // 3. مراقبة نبض ROS (مهلة 100ms = 5 دورات)
+    IF "DB_ROS_Proposal".seq <> #lastRosSeq AND #crcRosOk THEN
+        #lastRosSeq := "DB_ROS_Proposal".seq;
+        #lastRosTick := #tick;
+        #rosAlive := TRUE;
+    ELSIF (#tick - #lastRosTick) > 5 THEN
+        #rosAlive := FALSE;
+    ELSE
+        #rosAlive := TRUE;
+    END_IF;
+    
+    // 4. مراقبة نبض Plant (مهلة 200ms = 10 دورات)
+    IF "DB_Plant_To_PLC".plant_heartbeat <> #lastPlantHb AND #crcPlantOk THEN
+        #lastPlantHb := "DB_Plant_To_PLC".plant_heartbeat;
+        #lastPlantTick := #tick;
+        #plantAlive := TRUE;
+    ELSIF (#tick - #lastPlantTick) > 10 THEN
+        #plantAlive := FALSE;
+    ELSE
+        #plantAlive := TRUE;
+    END_IF;
+    
+    // 5. قراءة الإشارات المنطقية
+    #rosEnableReq := "DB_ROS_Proposal".flags.%X0;
+    #rosEstopReq := "DB_ROS_Proposal".flags.%X1;
+    #rosResetReq := ("DB_ROS_Proposal".state_request = 3);
+    #plantReady := "DB_Plant_To_PLC".plant_flags.%X0 AND #plantAlive;
+    #plantFault := "DB_Plant_To_PLC".plant_flags.%X1 OR NOT #plantAlive;
+    #plantHwEstop := "DB_Plant_To_PLC".plant_flags.%X3;
+    
+    #resetRising := ("DB_Config".ResetCmd OR #rosResetReq) AND NOT #prevResetCmd;
+    #prevResetCmd := ("DB_Config".ResetCmd OR #rosResetReq);
+    
+    // 6. آلة الحالة الصناعية (State Machine)
+    IF #rosEstopReq OR #plantHwEstop THEN
+        #state := 7; // ESTOP فوري
+    END_IF;
+    
+    CASE #state OF
+        0:
+            #state := 1; // BOOT -> COMM_WAIT
+        1:
+            IF #rosAlive THEN
+                #state := 2;
+            END_IF;
+        2: // IDLE
+            #axisEnableLatched := FALSE;
+            IF NOT #rosAlive THEN
+                #state := 8;
+            ELSIF #plantFault THEN
+                #state := 6;
+            ELSIF #rosEnableReq AND #plantReady THEN
+                #state := 3;
+            END_IF;
+        3: // ENABLING
+            #axisEnableLatched := TRUE;
+            IF NOT #rosEnableReq THEN
+                #state := 2;
+            ELSIF #plantFault THEN
+                #state := 6;
+            ELSIF #plantReady THEN
+                #state := 4; // READY
+            END_IF;
+        4, 5: // READY / RUNNING
+            #axisEnableLatched := TRUE;
+            IF NOT #rosEnableReq THEN
+                #state := 2;
+            ELSIF #plantFault THEN
+                #state := 6;
+            ELSIF NOT #rosAlive THEN
+                #state := 8;
+            END_IF;
+        6: // FAULT
+            #axisEnableLatched := FALSE;
+            IF NOT #plantFault THEN #state := 2;
+            END_IF;
+        7: // ESTOP (Latched)
+            #axisEnableLatched := FALSE;
+            IF NOT #rosEstopReq AND NOT #plantHwEstop AND #resetRising THEN
+                #state := 2;
+            END_IF;
+        8: // LOST
+            #axisEnableLatched := FALSE;
+            IF #rosAlive THEN
+                #state := 2;
+            END_IF;
+    END_CASE;
+    
+    // 7. حساب ميزانية الخطوة القصوى لكل مفصل (80% معامل أمان)
+    FOR #i := 0 TO 5 DO
+        "DB_PLC_Feedback".max_step_deg[#i] := "DB_Config".MaxVelDegPerSec[#i] * 0.020 * 0.8;
+    END_FOR;
+    "DB_PLC_Feedback".max_vel_deg_s := REAL#115.0;
+    
+    // 8. التحقق من المقترح الهندسي والأمني
+    #rejectMask := 0;
+    IF NOT #crcRosOk THEN
+        #rejectMask := #rejectMask OR 16#0040;
+    END_IF;
+    IF NOT #rosAlive THEN
+        #rejectMask := #rejectMask OR 16#0020;
+    END_IF;
+    IF (#state <> 4) AND (#state <> 5) THEN
+        #rejectMask := #rejectMask OR 16#0001;
+    END_IF;
+    IF #rosEstopReq OR #plantHwEstop THEN
+        #rejectMask := #rejectMask OR 16#0080;
+    END_IF;
+    IF #plantFault THEN
+        #rejectMask := #rejectMask OR 16#0100;
+    END_IF;
+    // (تم تعطيل فحص SOFT_LIMIT و STEP_LIMIT مؤقتاً لمرحلة التجريب)
+    
+    // 9. إصدار القرار وتحديث مخرجات DB37 و DB101
+    IF (#rejectMask = 0) AND "DB_ROS_Proposal".flags.%X2 THEN
+        "DB_PLC_Feedback".decision := 1; // Accepted
+        "DB_PLC_Feedback".reject_reason := 0;
+        "DB_PLC_Feedback".ack_proposal_id := "DB_ROS_Proposal".proposal_id;
+        "DB_PLC_Feedback".ack_seq := "DB_ROS_Proposal".seq;
+        FOR #i := 0 TO 5 DO
+            "DB_PLC_To_Plant".approved_pos_deg[#i] := "DB_ROS_Proposal".proposed_pos_deg[#i];
+        END_FOR;
+        IF #state = 4 THEN
+            #state := 5;
+        END_IF;
+    ELSE
+        "DB_PLC_Feedback".decision := 2; // Rejected
+        "DB_PLC_Feedback".reject_reason := #rejectMask;
+        IF NOT #axisEnableLatched THEN
+            FOR #i := 0 TO 5 DO
+                "DB_PLC_To_Plant".approved_pos_deg[#i] := "DB_Plant_To_PLC".actual_pos_deg[#i];
+            END_FOR;
+        END_IF;
+    END_IF;
+    
+    FOR #i := 0 TO 5 DO
+        "DB_PLC_Feedback".actual_pos_deg[#i] := "DB_Plant_To_PLC".actual_pos_deg[#i];
+        "DB_PLC_Feedback".actual_vel_deg_s[#i] := "DB_Plant_To_PLC".actual_vel_deg_s[#i];
+    END_FOR;
+    
+    "DB_PLC_Feedback".plc_state := INT_TO_WORD(#state);
+    "DB_PLC_Feedback".plc_flags.%X0 := #axisEnableLatched;
+    "DB_PLC_Feedback".plc_flags.%X1 := (#state = 7);
+    "DB_PLC_Feedback".plc_flags.%X2 := #rosAlive;
+    "DB_PLC_Feedback".plc_flags.%X4 := #plantFault;
+    "DB_PLC_Feedback".plc_flags.%X5 := "DB_Plant_To_PLC".plant_flags.%X2;
+    
+    "DB_PLC_To_Plant".plc_heartbeat := "DB_PLC_Feedback".plc_heartbeat;
+    "DB_PLC_To_Plant".plc_flags.%X0 := #axisEnableLatched;
+    "DB_PLC_To_Plant".plc_flags.%X1 := (#state = 7);
+    "DB_PLC_To_Plant".plc_state := WORD_TO_BYTE(INT_TO_WORD(#state));
+    
+    // 10. حساب CRC النهائي للمخرجات (DB101 و DB37)
+    #pos := 0;
+    #retVal := Serialize(SRC_VARIABLE := "DB_PLC_Feedback", DEST_ARRAY => #fbBuf, POS := #pos);
+    "DB_PLC_Feedback".crc := "FC_CalcCrc32"(Length := 168, Buffer := #fbBuf, CrcTable := #crcTable);
+    
+    #pos := 0;
+    #retVal := Serialize(SRC_VARIABLE := "DB_PLC_To_Plant", DEST_ARRAY => #toPlantBuf, POS := #pos);
+    "DB_PLC_To_Plant".crc := "FC_CalcCrc32"(Length := 56, Buffer := #toPlantBuf, CrcTable := #crcTable);
+    
