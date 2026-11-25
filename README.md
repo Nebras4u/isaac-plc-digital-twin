@@ -16,7 +16,9 @@ The repository hosts multiple generations of the platform, side by side:
 
 | Generation                 | Robot               | Transport                                        | Location                             | Status       |
 | :------------------------- | :------------------ | :----------------------------------------------- | :----------------------------------- | :----------- |
-| **Gen 4 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api / **ads** / **snap7** | [`vendor-neutral/`](vendor-neutral/) | **Active**   |
+| **Gen 5 — Real-Time `ros2_control`** | KUKA KR210 (6-DOF) | **C++ Snap7 + CRC32 (50 Hz)** | [`kuka_supervised_control/`](kuka_supervised_control/) | **Active (Gen 5)** |
+
+| **Gen 4 — Vendor-Neutral** | Any (config-driven) | tcp_json / opcua / plc_api / **ads** / **snap7** | [`vendor-neutral/`](vendor-neutral/) | Stable (v4.2) |
 | Gen 3 — Vendor-Neutral     | Any (config-driven) | tcp_json / opcua / plc_api                       | [`vendor-neutral/`](vendor-neutral/) | Predecessor  |
 | Gen 2 — Yaskawa GP110      | Yaskawa GP110       | OPC UA                                           | [`yaskawa/`](yaskawa/)               | Reference    |
 | Gen 1 — KUKA KR210         | KUKA KR210 L150 L   | TCP/JSON                                         | [`kuka/`](kuka/)                     | Reference    |
@@ -100,6 +102,17 @@ and does not indicate a regression.
 > verified inside the `isaac_reference_v3` container using
 > `--network host`. All 4 ADS connection tests pass in 0.04 s. See
 > [`vendor-neutral/docs/beckhoff_ads_setup.md`](vendor-neutral/docs/beckhoff_ads_setup.md).
+
+## Active Branch: `kuka_supervised_control/` (Gen 5 — Deterministic C++ `ros2_control`)
+
+This branch introduces **Generation 5**, shifting from Python middleware nodes to a **deterministic, zero-allocation C++ `ros2_control` `SystemInterface`** paired with a **Pure Safety Supervisor** on Siemens S7-1500 (`PLCSIM Advanced`).
+
+- **Defense-in-Depth Architecture:** ROS 2 proposes trajectories (`DB100`, 72B), the PLC validates CRC32, sequence liveness (`≤ 100 ms`), state machine readiness, and directional soft/step limits before forwarding approved setpoints (`DB37`, 64B) to NVIDIA Isaac Sim.
+- **Lock-Free Real-Time Concurrency:** Uses a wait-free `SpscTripleBuffer` and the C Snap7 API (`Cli_*`) to isolate the 50 Hz network I/O loop (`RtExecutor`) from the ROS 2 `ControllerManager`.
+- **Verified Industrial Fault-Injection:** Validated against directional soft-limit recovery, latched `ESTOP`, ROS 2 process freeze (`SIGSTOP`), and transient PLC communication loss (`LOST` state latch).
+- **Full Technical Walkthrough & Documentation:** See [`kuka_supervised_control/README.md`](kuka_supervised_control/README.md).
+
+---
 
 ## Active Development: `vendor-neutral/` (Gen 4 — v4.0.0)
 
